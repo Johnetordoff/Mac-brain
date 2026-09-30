@@ -36,6 +36,7 @@ def ask(question: str, max_tool_steps: int = 5) -> str:
             evidence.append(f"TOOL {call['tool']}: {_compact(result)}")
         except Exception as exc:
             evidence.append(f"TOOL {call['tool']} ERROR: {exc!r}")
+    # Give the model one final chance to answer without another tool call.
     context = "\n\n".join(evidence)[-4500:]
     final_prompt = (
         question
