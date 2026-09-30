@@ -297,7 +297,7 @@ The evidence database is:
 At the physical Mac:
 
 ```bash
-sudo ./scripts/network_unlock.sh
+sudo /bin/bash ./scripts/network_unlock.sh
 ```
 
 This stops the root network watchdog, restores the saved PF configuration, and restores the recorded DHCP/manual and IPv6 mode as closely as possible. Mac Brain itself has no inspection tool that invokes this script.
