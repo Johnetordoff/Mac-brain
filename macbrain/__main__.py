@@ -128,6 +128,8 @@ def main(argv=None) -> int:
             return 2
         print("Mac Brain local components are present.")
     elif args.cmd == "first-mission":
+        # Keep the pre-demonstration pass bounded on this very slow Mac. Deep recursive
+        # area scans wait for the background mission when the machine is idle/on AC.
         result = run_once(deep=False)
         from .tools import run_tool
         print("Baseline performance sample complete.")
