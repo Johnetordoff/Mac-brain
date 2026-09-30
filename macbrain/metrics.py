@@ -190,6 +190,7 @@ def child_directory_sizes(path: Path, max_children: int = 120) -> List[Dict[str,
             resolved = child
         if resolved == root:
             continue
+        # -d 1 should only return immediate children, but keep the result bounded.
         rows.append({"path": child, "bytes": kb * 1024})
     rows.sort(key=lambda x: x["bytes"], reverse=True)
     return rows[:max_children]
