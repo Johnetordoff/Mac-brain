@@ -19,6 +19,7 @@ GATEWAY=""
 LOCAL_IP=""
 NETMASK=""
 if [ -f "$NETWORK_META" ]; then
+  # Values were validated and written by the root-only lock script. Parse only known keys.
   SERVICE=$(/usr/bin/awk -F= '$1=="SERVICE"{sub(/^SERVICE=/,"");print;exit}' "$NETWORK_META")
   GATEWAY=$(/usr/bin/awk -F= '$1=="GATEWAY"{print $2;exit}' "$NETWORK_META")
   LOCAL_IP=$(/usr/bin/awk -F= '$1=="LOCAL_IP"{print $2;exit}' "$NETWORK_META")
