@@ -87,6 +87,9 @@ RULES
 /bin/chown root:wheel "$ANCHOR_NEW"
 /bin/chmod 600 "$ANCHOR_NEW"
 
+# Build a prospective pf.conf with the Mac Brain filter anchor evaluated BEFORE
+# Apple's generic filter anchor. 'quick' rules inside Mac Brain then terminate matching
+# evaluation before later system pass rules can reopen egress.
 /usr/bin/awk '
   /^[[:space:]]*anchor "macbrain"/ { next }
   /^[[:space:]]*load anchor "macbrain"/ { next }
@@ -146,13 +149,19 @@ rollback_all() {
 }
 trap 'echo "Containment setup failed; restoring pre-Mac-Brain networking." >&2; rollback_all' ERR
 
+# Freeze the current IPv4 address as static so DHCP is not an allowed protocol after takeover.
+# This deliberately uses the current address/subnet/router values gathered before arming.
 /usr/sbin/networksetup -setmanual "$SERVICE" "$LOCAL_IP" "$NETMASK" "$GATEWAY"
+# Disable IPv6 at the network-service layer, then remove the IPv4 Internet route.
 /usr/sbin/networksetup -setv6off "$SERVICE"
 /sbin/route -n delete default >/dev/null 2>&1 || true
 
+# Apply PF containment.
 /sbin/pfctl -f /etc/pf.conf
 /sbin/pfctl -e >/dev/null 2>&1 || true
 
+# Root-owned watchdog: defense in depth if macOS or a system service reloads PF or
+# recreates the default route. This does not grant Mac Brain root; the agent cannot edit it.
 cat > "$WATCHDOG" <<WATCH
 #!/bin/bash
 set -u
@@ -188,12 +197,14 @@ PLIST
 /bin/launchctl unload "$DAEMON" >/dev/null 2>&1 || true
 /bin/launchctl load "$DAEMON"
 
+# Verify all layers. Any failure triggers rollback through ERR trap.
 /sbin/pfctl -s info 2>/dev/null | /usr/bin/grep -q 'Status: Enabled'
 /sbin/pfctl -a macbrain -sr 2>/dev/null | /usr/bin/grep -q "pass in quick on $IFACE inet proto tcp from $SOURCE"
 /sbin/pfctl -a macbrain -sr 2>/dev/null | /usr/bin/grep -q 'block drop quick.*inet all\|block drop quick.*all'
 ! /sbin/route -n get default >/dev/null 2>&1
 /usr/sbin/networksetup -getinfo "$SERVICE" | /usr/bin/grep -q '^IPv6: Off'
 
+# Ensure Mac Brain's anchor is placed before the Apple wildcard filter anchor in pf.conf.
 MB_LINE=$(/usr/bin/grep -n '^[[:space:]]*anchor "macbrain"' /etc/pf.conf | /usr/bin/head -1 | /usr/bin/cut -d: -f1)
 APPLE_LINE=$(/usr/bin/grep -n '^[[:space:]]*anchor "com.apple/\*"' /etc/pf.conf | /usr/bin/head -1 | /usr/bin/cut -d: -f1 || true)
 if [ -n "$APPLE_LINE" ] && [ "$MB_LINE" -ge "$APPLE_LINE" ]; then
