@@ -56,3 +56,20 @@ class InstallLogicTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class MissionBootBindingTests(unittest.TestCase):
+    def test_mission_marker_is_bound_to_current_boot(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        import macbrain.config as cfg
+        with tempfile.TemporaryDirectory() as td:
+            marker = Path(td) / 'mission.active'
+            with mock.patch.object(cfg, 'MISSION_ACTIVE_PATH', marker), \
+                 mock.patch.object(cfg, 'ensure_dirs'), \
+                 mock.patch.object(cfg, '_boot_id', return_value='boot-a'):
+                cfg.set_mission_active(True, user_authorized=True)
+                self.assertTrue(cfg.mission_active())
+            with mock.patch.object(cfg, 'MISSION_ACTIVE_PATH', marker), \
+                 mock.patch.object(cfg, '_boot_id', return_value='boot-b'):
+                self.assertFalse(cfg.mission_active())

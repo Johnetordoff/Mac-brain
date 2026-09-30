@@ -41,6 +41,7 @@ WATCHDOG="$SUPPORT/network-watchdog.sh"
 PF_STATE="$SUPPORT/pf-was-enabled"
 NETWORK_BEFORE="$SUPPORT/network-before.txt"
 NETWORK_META="$SUPPORT/network-meta"
+CONTAINMENT_MARKER="$SUPPORT/containment-active"
 
 /bin/mkdir -p "$SUPPORT"
 /bin/chown root:wheel "$SUPPORT"
@@ -127,7 +128,7 @@ fi
 
 rollback_all() {
   /bin/launchctl unload "$DAEMON" >/dev/null 2>&1 || true
-  /bin/rm -f "$DAEMON" "$WATCHDOG"
+  /bin/rm -f "$DAEMON" "$WATCHDOG" "$CONTAINMENT_MARKER"
   if [ -f "$BACKUP" ]; then
     /bin/cp "$BACKUP" /etc/pf.conf
     /sbin/pfctl -f /etc/pf.conf >/dev/null 2>&1 || true
@@ -211,6 +212,12 @@ if [ -n "$APPLE_LINE" ] && [ "$MB_LINE" -ge "$APPLE_LINE" ]; then
   echo "Mac Brain PF anchor is not ahead of Apple's filter anchor." >&2
   false
 fi
+
+# Root-owned proof that containment successfully reached the verified state.
+# The ordinary Mac Brain user process cannot create or modify this marker.
+echo "armed" > "$CONTAINMENT_MARKER"
+/bin/chown root:wheel "$CONTAINMENT_MARKER"
+/bin/chmod 600 "$CONTAINMENT_MARKER"
 
 trap - ERR
 echo "Mac Brain network containment armed and verified."

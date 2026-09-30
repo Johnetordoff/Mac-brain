@@ -6,7 +6,7 @@ from unittest.mock import patch
 os.environ["MACBRAIN_HOME"] = tempfile.mkdtemp(prefix="macbrain-console-")
 
 from macbrain import db
-from macbrain.console import is_affirmative, is_takeover_phrase, run_prearm_console
+from macbrain.console import is_takeover_phrase, run_prearm_console
 from macbrain.config import mission_active, set_mission_active
 
 
@@ -14,21 +14,17 @@ class ConsoleTests(unittest.TestCase):
     def setUp(self):
         set_mission_active(False)
 
-    def test_natural_go_for_it_is_affirmative(self):
-        self.assertTrue(is_affirmative("Yeah, I know you are. Go for it."))
-
+    def test_natural_language_does_not_count_as_takeover_codeword(self):
+        self.assertFalse(is_takeover_phrase("Yeah, I know you are. Go for it."))
 
     def test_takeover_requires_explicit_takeover_language(self):
         self.assertTrue(is_takeover_phrase("TAKE OVER MAC BRAIN"))
         self.assertFalse(is_takeover_phrase("can you speed this up?"))
         self.assertFalse(is_takeover_phrase("yeah go for it"))
 
-    def test_random_text_does_not_start_mission(self):
-        self.assertFalse(is_affirmative("what did you find?"))
-
     def test_mission_state_persists_in_local_state(self):
         self.assertFalse(mission_active())
-        set_mission_active(True)
+        set_mission_active(True, user_authorized=True)
         self.assertTrue(mission_active())
         set_mission_active(False)
         self.assertFalse(mission_active())

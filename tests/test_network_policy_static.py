@@ -20,6 +20,14 @@ class NetworkPolicyStaticTests(unittest.TestCase):
         self.assertIn('print "anchor \\"macbrain\\""', self.text)
         self.assertIn('!inserted && /^[[:space:]]*anchor "com\\.apple\\/\\*"/', self.text)
 
+    def test_containment_marker_created_by_lock_and_removed_by_unlock(self):
+        lock = Path("scripts/network_lock.sh").read_text()
+        unlock = Path("scripts/network_unlock.sh").read_text()
+        self.assertIn('CONTAINMENT_MARKER="$SUPPORT/containment-active"', lock)
+        self.assertIn('echo "armed" > "$CONTAINMENT_MARKER"', lock)
+        self.assertIn('CONTAINMENT_MARKER="$SUPPORT/containment-active"', unlock)
+        self.assertIn('"$CONTAINMENT_MARKER"', unlock)
+
 
 if __name__ == "__main__":
     unittest.main()

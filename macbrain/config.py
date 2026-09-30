@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import subprocess
 from pathlib import Path
 from typing import Any, Dict
 
@@ -49,17 +51,51 @@ def save_config(config: Dict[str, Any]) -> None:
     os.chmod(CONFIG_PATH, 0o600)
 
 
+def _boot_id() -> str:
+    """Return a per-boot identifier so an active marker never survives a reboot."""
+    try:
+        out = subprocess.run(
+            ["/usr/sbin/sysctl", "-n", "kern.boottime"],
+            capture_output=True, text=True, check=False,
+        ).stdout
+        m = re.search(r"sec\s*=\s*(\d+)", out or "")
+        if m:
+            return "darwin:" + m.group(1)
+    except OSError:
+        pass
+    # Test/non-macOS fallback. Linux boot_id changes every boot.
+    try:
+        return "linux:" + Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    except OSError:
+        return "unknown-boot"
+
+
 def mission_active() -> bool:
-    return MISSION_ACTIVE_PATH.exists()
+    if not MISSION_ACTIVE_PATH.exists():
+        return False
+    try:
+        data = json.loads(MISSION_ACTIVE_PATH.read_text())
+    except (ValueError, OSError):
+        return False
+    return data.get("mission") == "speed_up_mac_brain" and data.get("boot_id") == _boot_id()
 
 
-def set_mission_active(active: bool) -> None:
+def set_mission_active(active: bool, *, user_authorized: bool = False) -> bool:
+    """Set mission state. Activation is fail-closed unless the explicit user-start path authorizes it.
+
+    Existing/bootstrap code may safely call set_mission_active(True): it will not wake Mac Brain.
+    Only lifecycle.start_mac_brain(), after TTY + code-word + containment checks, passes
+    user_authorized=True. Deactivation is always allowed.
+    """
     ensure_dirs()
     if active:
-        MISSION_ACTIVE_PATH.write_text("speed_up_mac_brain\n")
+        if not user_authorized:
+            return False
+        MISSION_ACTIVE_PATH.write_text(json.dumps({"mission": "speed_up_mac_brain", "boot_id": _boot_id()}) + "\n")
         os.chmod(MISSION_ACTIVE_PATH, 0o600)
-    else:
-        try:
-            MISSION_ACTIVE_PATH.unlink()
-        except FileNotFoundError:
-            pass
+        return True
+    try:
+        MISSION_ACTIVE_PATH.unlink()
+    except FileNotFoundError:
+        pass
+    return True

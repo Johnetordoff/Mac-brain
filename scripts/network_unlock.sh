@@ -9,10 +9,11 @@ WATCHDOG="$SUPPORT/network-watchdog.sh"
 PF_STATE="$SUPPORT/pf-was-enabled"
 NETWORK_BEFORE="$SUPPORT/network-before.txt"
 NETWORK_META="$SUPPORT/network-meta"
+CONTAINMENT_MARKER="$SUPPORT/containment-active"
 
 [ -f "$BACKUP" ] || { echo "No pre-Mac-Brain pf backup found." >&2; exit 1; }
 /bin/launchctl unload "$DAEMON" >/dev/null 2>&1 || true
-/bin/rm -f "$DAEMON" "$WATCHDOG"
+/bin/rm -f "$DAEMON" "$WATCHDOG" "$CONTAINMENT_MARKER"
 
 SERVICE=""
 GATEWAY=""

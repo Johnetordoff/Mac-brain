@@ -13,10 +13,8 @@
     </array>
     <key>WorkingDirectory</key>
     <string>__REPO__</string>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
+    <!-- Intentionally no RunAtLoad, KeepAlive, StartInterval, or calendar trigger.
+         Mac Brain starts only when the user explicitly runs `macbrain start`. -->
     <key>ProcessType</key>
     <string>Background</string>
     <key>LowPriorityIO</key>

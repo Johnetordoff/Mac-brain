@@ -7,23 +7,7 @@ from typing import Optional
 
 from . import db
 from .agent import ask as agent_ask
-from .config import mission_active, set_mission_active
-
-
-def is_affirmative(text: str) -> bool:
-    normalized = re.sub(r"[^a-z0-9 ]+", " ", text.lower())
-    normalized = " ".join(normalized.split())
-    if not normalized:
-        return False
-    phrases = (
-        "yes", "yeah", "yep", "yup", "go", "go for it", "start", "start it",
-        "start mission", "do it", "begin", "affirmative", "you got it",
-    )
-    if normalized in phrases:
-        return True
-    if "go for it" in normalized or normalized.startswith("yes ") or normalized.startswith("yeah "):
-        return True
-    return False
+from .config import mission_active
 
 
 def _report_watcher(stop: threading.Event, start_id: int) -> None:
@@ -41,14 +25,7 @@ def _report_watcher(stop: threading.Event, start_id: int) -> None:
 
 
 def is_takeover_phrase(text: str) -> bool:
-    normalized = re.sub(r"[^a-z0-9 ]+", " ", text.lower())
-    normalized = " ".join(normalized.split())
-    return normalized in {
-        "take over mac brain",
-        "take over",
-        "arm mac brain",
-        "give mac brain the computer",
-    }
+    return text.strip() == "TAKE OVER MAC BRAIN"
 
 
 def run_prearm_console() -> int:
@@ -64,7 +41,7 @@ def run_prearm_console() -> int:
     print("I can inspect this Mac, reason locally, and show you what I think is making it slow, but I am not yet running the autonomous mission and I cannot delete anything on my own.")
     print("Ask me something like: can you speed this up?")
     print("When you're satisfied that I can inspect the machine intelligently, type: TAKE OVER MAC BRAIN")
-    print("That returns control to the installer, which will apply the SSH-only/no-egress containment before the autonomous mission starts.\n")
+    print("That returns control to the installer, which will apply the SSH-only/no-egress containment. Mac Brain will still remain OFF afterward.\n")
 
     while True:
         try:
@@ -102,12 +79,12 @@ def run_prearm_console() -> int:
 def run_console() -> int:
     active = mission_active()
     if active:
-        print("Hey John. I'm Mac Brain, your local AI unit. My mission is already active: speed up this computer.")
-        print("I'll keep working in the background after this terminal closes. Reports will appear here while this console is open.")
+        print("Hey John. I'm Mac Brain, your local AI unit. I am ON because you explicitly started me.")
+        print("I will keep working in the background until you run `macbrain stop` or type STOP MAC BRAIN here.")
     else:
-        print("Hey John. I'm Mac Brain, your local AI unit. I'm here to speed up this computer.")
-        print("My mission is to hunt for evidence explaining why this Mac is slow, find reclaimable junk carefully, and propose changes without deleting anything on my own.")
-        print("If that's what you want, tell me to go for it.")
+        print("Hey John. I'm Mac Brain, your local AI unit. I am OFF.")
+        print("Start is always explicit: leave this console, run `macbrain start`, and type START MAC BRAIN.")
+        print("A reboot never starts Mac Brain automatically.")
 
     stop = threading.Event()
     watcher = threading.Thread(target=_report_watcher, args=(stop, db.latest_report_id()), daemon=True)
@@ -123,32 +100,27 @@ def run_console() -> int:
                 continue
             lower = text.lower().strip()
 
+            if text == "STOP MAC BRAIN":
+                from .lifecycle import stop_mac_brain
+                stop_mac_brain()
+                db.add_report("mission", "Mac Brain stopped by explicit user code word.")
+                print("Mac Brain is OFF and will remain off after reboot.")
+                return 0
+
             if not mission_active():
-                if is_affirmative(text):
-                    set_mission_active(True)
-                    db.add_report(
-                        "mission",
-                        "Mission accepted. SPEED UP MAC BRAIN is active. I am monitoring continuously; heavier filesystem investigation and local AI reasoning will run in the background when this Mac is on AC power and sufficiently idle. I will not delete anything without your explicit approval.",
-                    )
-                    print("Mission active. Go do something else if you want; I will keep working after this terminal closes.")
-                    continue
                 if lower in {"quit", "exit"}:
                     break
-                print("I haven't started the autonomous mission yet. Say 'go for it', 'yes', or 'start mission' when you want me to begin.")
+                if text == "START MAC BRAIN":
+                    print("For startup isolation, use the shell command `macbrain start`; it will ask you to type START MAC BRAIN in an interactive terminal.")
+                    continue
+                print("Mac Brain is OFF. No ordinary conversation can start it. Run `macbrain start` when you want it on.")
                 continue
 
             if lower in {"quit", "exit"}:
-                print("Leaving the console. The background mission keeps running.")
+                print("Leaving the console. Mac Brain remains ON until you explicitly run `macbrain stop`.")
                 break
-            if lower in {"pause", "pause mission", "stop mission"}:
-                set_mission_active(False)
-                db.add_report("mission", "Mission paused by John. Cheap evidence collection remains available, but autonomous deep scans and AI reasoning are paused.")
-                print("Mission paused. Say 'go for it' when you want me to resume.")
-                continue
-            if lower in {"resume", "resume mission", "start", "start mission", "go", "go for it"}:
-                set_mission_active(True)
-                db.add_report("mission", "Mission resumed. SPEED UP MAC BRAIN is active again.")
-                print("Mission active.")
+            if lower in {"pause", "pause mission", "stop mission", "resume", "resume mission", "start", "start mission", "go", "go for it", "yes", "yeah"}:
+                print("Lifecycle changes do not accept conversational shortcuts. Use `macbrain stop` or `macbrain start`.")
                 continue
             if lower == "status":
                 from .__main__ import print_status
@@ -159,7 +131,7 @@ def run_console() -> int:
                 print_proposals()
                 continue
             if lower in {"help", "?"}:
-                print("Talk to me normally, or use: status | proposals | pause | resume | quit")
+                print("Talk to me normally, or use: status | proposals | STOP MAC BRAIN | quit")
                 continue
 
             print("Thinking locally. The background hunter is still running...")

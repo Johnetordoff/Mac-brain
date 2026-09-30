@@ -185,6 +185,12 @@ def _run_ai_cycle(done: threading.Event) -> None:
 
 
 def daemon() -> None:
+    # After containment, an unloaded/accidentally loaded LaunchAgent must not do any work
+    # unless the user explicitly activated Mac Brain during this boot. Before containment
+    # the installer is allowed to run the daemon briefly for its proof-of-life test.
+    containment_marker = Path("/Library/Application Support/MacBrain/containment-active")
+    if containment_marker.exists() and not mission_active():
+        return
     cfg = load_config()
     sample_seconds = max(15, int(cfg.get("sample_seconds", 60)))
     report_every = max(60, int(cfg.get("report_seconds", 120)))

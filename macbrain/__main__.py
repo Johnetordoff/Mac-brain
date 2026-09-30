@@ -68,8 +68,11 @@ def main(argv=None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status")
     sub.add_parser("monitor")
-    sub.add_parser("doctor")
+    doctor_parser = sub.add_parser("doctor")
+    doctor_parser.add_argument("--expect-running", action="store_true")
     sub.add_parser("console")
+    sub.add_parser("start")
+    sub.add_parser("stop")
     sub.add_parser("prearm-console")
     sub.add_parser("security-audit")
     first = sub.add_parser("first-mission")
@@ -91,6 +94,22 @@ def main(argv=None) -> int:
         print_status()
     elif args.cmd == "monitor":
         daemon()
+    elif args.cmd == "start":
+        from .lifecycle import start_mac_brain
+        try:
+            state = start_mac_brain(require_tty=True)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print("Mac Brain started by explicit user command.")
+        print(f"Background worker running: {'yes' if state.get('running') else 'no'}")
+    elif args.cmd == "stop":
+        from .lifecycle import stop_mac_brain
+        state = stop_mac_brain()
+        print("Mac Brain is OFF. Autonomous AI/background work is stopped.")
+        if state.get("terminated_llama_pids"):
+            print("Stopped local Qwen process(es): " + ", ".join(str(x) for x in state["terminated_llama_pids"]))
+        print("It will remain OFF after logout or reboot until you explicitly run `macbrain start` and type START MAC BRAIN.")
     elif args.cmd == "console":
         from .console import run_console
         return run_console()
@@ -113,13 +132,18 @@ def main(argv=None) -> int:
         ).returncode == 0
         recent = db.recent_samples(1)
         fresh_sample = bool(recent and time.time() - float(recent[0].get("ts", 0)) < 300)
+        active = mission_active()
+        containment_marker = Path("/Library/Application Support/MacBrain/containment-active")
+        # Before containment the installer intentionally starts the worker for a short
+        # proof-of-life check. After containment, OFF means the worker must be unloaded.
+        expect_running = bool(args.expect_running or active or not containment_marker.exists())
         checks = {
             "local_model": Path(str(cfg.get("model_path", ""))).exists(),
             "llama_cli": Path(str(cfg.get("llama_cli", ""))).exists(),
             "evidence_db": DB_PATH.exists(),
             "fresh_evidence_sample": fresh_sample,
             "launch_agent_plist": launch_plist.exists(),
-            "launch_agent_running": launch_running,
+            "launch_agent_state_expected": (launch_running == expect_running),
             "command_wrapper": Path("/usr/local/bin/macbrain").exists(),
         }
         for name, ok in checks.items():
@@ -170,6 +194,9 @@ def main(argv=None) -> int:
             print("\nMac Brain synthesis:\n")
             print(agent_ask("This is your first mission. Using the evidence you have just collected, explain the strongest current hypotheses for why this Mac is slow and what I should investigate first. Start with the biggest likely-reclaimable areas, but distinguish exact observations from guesses. Do not delete or disable anything."))
     elif args.cmd == "ask":
+        if not mission_active():
+            print("Mac Brain is OFF. Run `macbrain start` first.", file=sys.stderr)
+            return 2
         print(agent_ask(args.question))
     elif args.cmd == "proposals":
         print_proposals()
