@@ -13,7 +13,7 @@ After containment:
 - Mac Brain initiates **no Internet connection**.
 - Mac Brain initiates **no connection to another LAN computer**.
 - It does not fetch or pull from GitHub, another Git server, another brain, a URL, an SSH host, or a LAN share.
-- The existing PF policy admits SSH only when the explicitly authorized controller initiates the connection to Mac Brain.
+- The existing PF policy still admits SSH only when the explicitly authorized controller initiates the connection to Mac Brain.
 - Reply packets belonging to that inbound connection are allowed because TCP requires them.
 - Git traffic uses that already-authorized inbound SSH path. No Git daemon, HTTP server, web UI, discovery service, or synchronization daemon is opened.
 - If John wants to interact with Mac Brain without the inbound controller connection, he can use the physical Mac directly.
@@ -74,6 +74,8 @@ git push macbrain main
 ```
 
 Tags or additional branches should be sent only when they are actually wanted. Do **not** reflexively mirror every branch, tag, generated capsule, or old checkpoint to this storage-constrained machine.
+
+For a `.brain` payload, the intended pattern is similarly selective: another machine decides which prepared checkpoint Mac Brain should have, then sends that checkpoint inward. Mac Brain stores what it was handed; it does not decide whether a better or newer brain exists somewhere else.
 
 To read it back later, the controller initiates the connection again:
 
