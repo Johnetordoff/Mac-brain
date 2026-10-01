@@ -62,6 +62,27 @@ def print_proposals() -> None:
         print()
 
 
+def _print_git_repos() -> None:
+    from .gitstore import list_repos
+    names = list_repos()
+    if not names:
+        print("No Mac Brain Git repositories yet.")
+        print("Create one with: macbrain git create NAME")
+        return
+    for name in names:
+        print(name)
+
+
+def _print_git_capacity() -> None:
+    from .gitstore import storage_capacity
+    capacity = storage_capacity()
+    print(f"Disk total: {_bytes(int(capacity['total']))}")
+    print(f"Disk free: {_bytes(int(capacity['free']))}")
+    print(f"Protected free-space reserve: {_bytes(int(capacity['reserve']))}")
+    print(f"Maximum one incoming Git receive: {_bytes(int(capacity['max_receive_bytes']))}")
+    print(f"Accept new Git data: {'yes' if capacity['write_ok'] else 'no'}")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="macbrain")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -87,6 +108,18 @@ def main(argv=None) -> int:
     mode.add_argument("--quarantine", action="store_true")
     mode.add_argument("--delete", action="store_true")
     a.add_argument("--confirm-delete", action="store_true")
+
+    git_parser = sub.add_parser(
+        "git",
+        help="manage the passive inbound-only Git vault; no model reasoning or outbound sync",
+    )
+    git_sub = git_parser.add_subparsers(dest="git_cmd", required=True)
+    git_sub.add_parser("list", help="cheap name-only listing of stored repositories")
+    git_sub.add_parser("capacity", help="show free-space guard without scanning repositories")
+    git_create = git_sub.add_parser("create", help="create an empty guarded bare repository")
+    git_create.add_argument("name")
+    git_info = git_sub.add_parser("info", help="explicitly inspect one repository")
+    git_info.add_argument("name")
 
     args = parser.parse_args(argv)
     if args.cmd == "status":
@@ -148,6 +181,22 @@ def main(argv=None) -> int:
         if not all(checks.values()):
             return 2
         print("Mac Brain local components are present.")
+    elif args.cmd == "git":
+        from .gitstore import create_repo, repo_summary
+        try:
+            if args.git_cmd == "list":
+                _print_git_repos()
+            elif args.git_cmd == "capacity":
+                _print_git_capacity()
+            elif args.git_cmd == "create":
+                path = create_repo(args.name)
+                print(f"Created passive guarded bare repository: {path}")
+                print(f"SSH path from the authorized controller: .macbrain/git/{args.name}.git")
+            elif args.git_cmd == "info":
+                print(json.dumps(repo_summary(args.name), indent=2, sort_keys=True))
+        except (FileExistsError, FileNotFoundError, RuntimeError, ValueError) as exc:
+            print(f"Mac Brain Git: {exc}", file=sys.stderr)
+            return 2
     elif args.cmd == "first-mission":
         # Keep the pre-demonstration pass bounded on this very slow Mac. Deep recursive
         # area scans wait for the background mission when the machine is idle/on AC.

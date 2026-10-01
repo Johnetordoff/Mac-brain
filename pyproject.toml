@@ -1,8 +1,9 @@
 [project]
 name = "mac-brain"
-version = "0.5.0"
-description = "Local, SSH-controlled performance hunter for an old Mac"
-requires-python = ">=3.8"
+version = "0.7.0"
+description = "Python-only local maintenance agent and passive inbound-only Git vault for an old Mac"
+requires-python = ">=3.14,<3.15"
+dependencies = []
 
 [project.scripts]
 macbrain = "macbrain.__main__:main"

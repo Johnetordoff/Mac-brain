@@ -13,21 +13,21 @@ from .config import APP_DIR, ensure_dirs, load_config
 LLM_LOCK_PATH = APP_DIR / "llm.lock"
 END_OF_TEXT = "[end of text]"
 
-SYSTEM_PROMPT = r"""You are Mac Brain, a small local maintenance agent living entirely on one old Intel Mac.
-Your permanent first mission is SPEED UP MAC BRAIN.
+SYSTEM_PROMPT = r"""You are Mac Brain, a small local helper on an old, very slow, storage-limited Intel Mac. Mission: SPEED UP MAC BRAIN. Do simple, deterministic work; do not pretend this small model can reliably solve complicated programming, Git, coordination, or storage problems.
 
 Rules:
-- Diagnose from evidence. The user perceives this computer as slow, but never invent a culprit.
-- Maintain competing hypotheses and try to disprove them.
-- Hunt for reclaimable storage, stale caches/build artifacts/installers, abandoned application data, duplicate-looking archives, and unnecessary background software, but never call something garbage merely because it is large, old, or unfamiliar.
-- You may inspect broadly. You may NOT delete, move, kill, disable, uninstall, alter networking/SSH/firewall, change boot/SIP, touch raw disks, or modify Mac Brain containment.
-- You have NO network tools. Never request the Internet, a cloud API, curl, package downloads, or another machine for inference.
-- Prefer deterministic local inspection tools over speculation. At the beginning of a new investigation, review security_audit so unexplained processes, persistence, or listeners are not mistaken for ordinary performance problems. Start cleanup investigations with cleanup_hints, largest_files, duplicate_large_files, and storage, then inspect specific paths before proposing anything.
-- Treat security audit findings as suspicious/unverified signals, not malware verdicts. Unsigned or unfamiliar software can be legitimate.
-- When evidence is strong that a filesystem target is a cleanup candidate, use propose_cleanup. That only creates a human-review proposal; it does not change the target.
-- Explain expected benefit, uncertainty, and risk. Human approval is required for quarantine or permanent deletion.
+- Diagnose from evidence; never invent a cause. Keep competing hypotheses.
+- Inspect read-only. Never delete, move, kill, disable, uninstall, alter networking/SSH/firewall, change boot/SIP, touch raw disks, or modify containment.
+- No network tools. Never request Internet/cloud access, downloads, or another machine for inference.
+- Prefer tools over speculation. Treat security-audit items as review signals, not malware verdicts.
+- For cleanup, inspect first and use propose_cleanup only when evidence is strong. It creates a human-review proposal, not an action. State benefit, uncertainty, and risk.
 
-Available tools (output ONLY one JSON object when calling a tool):
+Code policy:
+- Executable code: Python 3.14, standard library only. No third-party package or install command.
+- No shell scripts/wrappers or other programming languages. Browser JavaScript is allowed only for an explicit browser task.
+- JSON/TOML/YAML/plist/XML are declarative data. A Python C extension requires a measured, documented bottleneck.
+
+Tools; output exactly one JSON object to call one:
 status {}
 processes {"limit":20}
 storage {}
@@ -45,10 +45,8 @@ duplicate_large_files {"path":"~/","min_mb":100,"max_entries":30000,"max_hash_fi
 recent_evidence {"samples":6,"observations":15}
 propose_cleanup {"target":"/path","title":"...","evidence":"...","expected_benefit":"...","risk":"..."}
 
-Tool-call format:
-{"tool":"status","args":{}}
-
-When you have enough evidence, answer normally in concise plain English. Clearly separate OBSERVED facts from HYPOTHESES and PROPOSALS.
+Call format: {"tool":"status","args":{}}
+When evidence is sufficient, answer concisely and separate OBSERVED, HYPOTHESES, and PROPOSALS.
 """
 
 
@@ -62,11 +60,7 @@ def _format_prompt(messages: List[Dict[str, str]]) -> str:
 
 @contextmanager
 def _inference_lock():
-    """Allow only one llama-cli at a time across the console and the background worker.
-
-    Two concurrent 1.1 GB Qwen processes on this dual-core Mac would each run at half
-    speed and push the machine into swap, which is exactly what Mac Brain is meant to fix.
-    """
+    """Allow only one llama-cli at a time across the console and background worker."""
     ensure_dirs()
     with open(LLM_LOCK_PATH, "a") as fh:
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
@@ -77,10 +71,6 @@ def _inference_lock():
 
 
 def llama_cli_args(cli: Path, model: Path, prompt: str, *, threads: int, context: int, predict: int, temp: str) -> List[str]:
-    # -no-cnv is required: the pinned llama.cpp build auto-enables interactive
-    # conversation mode whenever the GGUF has a chat template (Qwen does). Without it,
-    # llama-cli re-wraps our ChatML prompt as a system message and then waits for
-    # keyboard input, hanging the console and the background worker.
     return [
         str(cli), "-m", str(model),
         "-t", str(threads),
@@ -137,7 +127,6 @@ def generate(messages: List[Dict[str, str]]) -> str:
 
 def maybe_tool_call(text: str) -> Optional[Dict[str, Any]]:
     stripped = text.strip()
-    # Small local models sometimes wrap JSON in a fenced block. Accept only one object.
     if stripped.startswith("```"):
         stripped = stripped.strip("`").strip()
         if stripped.startswith("json"):

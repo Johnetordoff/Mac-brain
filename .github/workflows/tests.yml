@@ -9,16 +9,32 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run unit tests
-        run: python3 -m unittest discover -s tests -v
-      - name: Check Python syntax
-        run: python3 -m py_compile install.py macbrain/*.py
-      - name: Check shell syntax
-        run: bash -n scripts/network_lock.sh scripts/network_unlock.sh scripts/uninstall.sh
-      - name: Check Python 3.8 compatibility (Big Sur /usr/bin/python3)
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Enforce Python-only repository policy
+        shell: python
         run: |
-          python3 - <<'PY'
-          import ast, glob
-          for f in ["install.py"] + glob.glob("macbrain/*.py") + glob.glob("tests/*.py"):
-              ast.parse(open(f).read(), f, feature_version=(3, 8))
-          PY
+          import runpy
+          runpy.run_path("tools/repo_policy.py", run_name="__main__")
+      - name: Run unit tests
+        shell: python
+        run: |
+          import os
+          import sys
+          import unittest
+          sys.path.insert(0, os.getcwd())
+          suite = unittest.defaultTestLoader.discover("tests")
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(0 if result.wasSuccessful() else 1)
+      - name: Compile every Python program
+        shell: python
+        run: |
+          import compileall
+          ok = True
+          for target in ("install.py", "macbrain", "scripts", "tools", "tests"):
+              if target.endswith(".py"):
+                  ok = compileall.compile_file(target, quiet=1) and ok
+              else:
+                  ok = compileall.compile_dir(target, quiet=1) and ok
+          raise SystemExit(0 if ok else 1)

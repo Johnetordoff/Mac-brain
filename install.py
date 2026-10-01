@@ -7,12 +7,15 @@ import ipaddress
 import json
 import os
 import platform
+import py_compile
 import shutil
 import socket
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -26,31 +29,44 @@ MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main
 MODEL_SHA256 = "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e"
 LLAMA_TAG = "b4528"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
+REQUIRED_PYTHON = (3, 14)
 
 
-def sh(args, *, check=True, capture=False, cwd=None, input_text=None):
-    return subprocess.run(
+def require_python_baseline() -> None:
+    if sys.version_info[:2] != REQUIRED_PYTHON:
+        found = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        raise SystemExit(
+            "Mac Brain stops before installation because its repository policy requires "
+            f"CPython 3.14.x and this interpreter is {found}. Install the current CPython "
+            "3.14 release, make `python3` resolve to it for this install, and rerun "
+            "`python3 install.py`. No Mac Brain setup or containment was changed."
+        )
+
+
+def sh(args, *, check=True, capture=False, cwd=None, input_text=None, env=None):
+    result = subprocess.run(
         args,
-        check=check,
+        check=False,
         text=True,
         input=input_text,
         cwd=str(cwd) if cwd else None,
+        env=env,
         stdout=subprocess.PIPE if capture else None,
         stderr=subprocess.PIPE if capture else None,
     )
-
+    if check and result.returncode != 0:
+        detail = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()
+        raise RuntimeError(f"command failed ({result.returncode}): {args!r}\n{detail}")
+    return result
 
 
 def network_service_for_interface(interface: str) -> str:
-    """Return the macOS network service name corresponding to a BSD interface."""
     result = sh(["/usr/sbin/networksetup", "-listnetworkserviceorder"], check=False, capture=True)
     current = ""
     for raw in (result.stdout or "").splitlines():
         line = raw.strip()
         if line.startswith("(") and ") " in line and "Hardware Port:" not in line:
-            current = line.split(") ", 1)[1].strip()
-            if current.startswith("*"):
-                current = current[1:].strip()
+            current = line.split(") ", 1)[1].strip().lstrip("*").strip()
         if f"Device: {interface})" in line and current:
             return current
     return ""
@@ -59,12 +75,11 @@ def network_service_for_interface(interface: str) -> str:
 def sudo_auth() -> threading.Event:
     print("Administrator authentication is required. macOS sudo will ask for your password now.")
     print("Mac Brain does not read, echo, store, or pass your password to the local model.")
-    p = subprocess.run(["sudo", "-v"])
-    if p.returncode != 0:
+    if subprocess.run(["sudo", "-v"]).returncode != 0:
         raise SystemExit("sudo authentication failed")
     stop = threading.Event()
 
-    def keepalive():
+    def keepalive() -> None:
         while not stop.wait(50):
             subprocess.run(["sudo", "-n", "-v"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -73,19 +88,18 @@ def sudo_auth() -> threading.Event:
 
 
 def preflight(allow_sip_disabled: bool) -> dict:
+    require_python_baseline()
     if platform.system() != "Darwin":
         raise SystemExit("Mac Brain bootstrap must be run on macOS.")
     ver = platform.mac_ver()[0]
     arch = platform.machine()
-    print(f"Detected macOS {ver or 'unknown'} on {arch}.")
+    print(f"Detected macOS {ver or 'unknown'} on {arch}; CPython {platform.python_version()}.")
     if arch != "x86_64":
-        raise SystemExit("This first Mac Brain build is intentionally targeted at Intel x86_64.")
+        raise SystemExit("This Mac Brain build is intentionally targeted at Intel x86_64.")
     if ver and not ver.startswith("11.7."):
-        print("WARNING: first target is Big Sur 11.7.x; continuing, but this exact OS has not been the primary target.")
-    if sys.version_info < (3, 8):
-        raise SystemExit(f"Python 3.8+ required; found {sys.version.split()[0]}")
+        print("WARNING: primary target remains Big Sur 11.7.x.")
     if not Path("/usr/bin/git").exists():
-        raise SystemExit("/usr/bin/git is missing. The three-command install requires Apple Command Line Tools.")
+        raise SystemExit("/usr/bin/git is missing. Apple Command Line Tools are required.")
 
     sip = sh(["/usr/bin/csrutil", "status"], check=False, capture=True)
     sip_text = ((sip.stdout or "") + (sip.stderr or "")).strip()
@@ -111,15 +125,12 @@ def preflight(allow_sip_disabled: bool) -> dict:
             lan_cidr = str(ipaddress.IPv4Network(f"{local_ip}/{netmask}", strict=False))
         except ValueError:
             pass
-
     network_service = network_service_for_interface(interface)
-
     mem = sh(["/usr/sbin/sysctl", "-n", "hw.memsize"], check=False, capture=True).stdout.strip()
     try:
         memory_bytes = int(mem)
     except ValueError:
         memory_bytes = 0
-
     return {
         "macos": ver,
         "arch": arch,
@@ -136,11 +147,6 @@ def preflight(allow_sip_disabled: bool) -> dict:
 
 
 def authorized_ssh_source(info: dict, input_fn=input) -> str:
-    """Choose exactly one IPv4 controller host for the post-arm SSH doorway.
-
-    A whole LAN CIDR is intentionally not accepted: after takeover, only the user's
-    controller computer should be able to initiate an IP connection to Mac Brain.
-    """
     parts = os.environ.get("SSH_CONNECTION", "").split()
     candidate = ""
     if parts:
@@ -154,24 +160,19 @@ def authorized_ssh_source(info: dict, input_fn=input) -> str:
         try:
             candidate = str(ipaddress.IPv4Address(env_candidate))
         except ipaddress.AddressValueError:
-            raise SystemExit("MACBRAIN_CONTROLLER_IP is not a valid IPv4 address. Network isolation was NOT applied.")
+            raise SystemExit("MACBRAIN_CONTROLLER_IP is not valid IPv4. Containment was NOT applied.")
     if not candidate:
-        print("Mac Brain needs the IPv4 address of the ONE other computer that will be allowed to SSH in after takeover.")
-        candidate = input_fn("Controller computer IPv4 address: ").strip()
+        print("Enter the IPv4 address of the ONE controller computer allowed to initiate SSH after takeover.")
         try:
-            candidate = str(ipaddress.IPv4Address(candidate))
+            candidate = str(ipaddress.IPv4Address(input_fn("Controller computer IPv4 address: ").strip()))
         except ipaddress.AddressValueError:
-            raise SystemExit("Controller address is not valid IPv4. Network isolation was NOT applied.")
+            raise SystemExit("Controller address is not valid IPv4. Containment was NOT applied.")
     cidr = str(info.get("lan_cidr", ""))
-    if cidr:
-        try:
-            if ipaddress.IPv4Address(candidate) not in ipaddress.IPv4Network(cidr, strict=False):
-                raise SystemExit(
-                    f"Controller {candidate} is not on Mac Brain's directly attached LAN {cidr}. "
-                    "Takeover deliberately requires same-LAN IPv4 SSH so the default Internet route can be removed."
-                )
-        except ValueError:
-            pass
+    if cidr and ipaddress.IPv4Address(candidate) not in ipaddress.IPv4Network(cidr, strict=False):
+        raise SystemExit(
+            f"Controller {candidate} is not on Mac Brain's directly attached LAN {cidr}. "
+            "Containment requires same-LAN IPv4 SSH."
+        )
     return candidate
 
 
@@ -186,20 +187,20 @@ def viability_assessment(*, memory_bytes: int, disk_free_bytes: int, battery_sou
     elif disk_free_bytes < 8 * gib:
         warnings.append("free disk space is tight; cleanup should be an early priority")
     if battery_source and battery_source.lower() == "battery power":
-        blockers.append("Mac is running on battery power; plug in AC before the long build/model download")
+        blockers.append("Mac is running on battery power; plug in AC before long bootstrap work")
     elif battery_source and battery_source.lower() not in ("ac power", "unknown"):
         warnings.append(f"power source could not be confirmed as AC ({battery_source})")
     if cpu_count and load1 / max(cpu_count, 1) > 1.0:
-        warnings.append("the machine is already heavily loaded before Mac Brain starts")
+        warnings.append("the machine is already heavily loaded")
     return {"blockers": blockers, "warnings": warnings}
 
 
 def early_viability_diagnostics(info: dict) -> None:
     print("\nRunning early Mac Brain viability diagnostics before downloads/builds...")
     cpu = sh(["/usr/sbin/sysctl", "-n", "machdep.cpu.brand_string"], check=False, capture=True).stdout.strip()
-    cpu_count_raw = sh(["/usr/sbin/sysctl", "-n", "hw.logicalcpu"], check=False, capture=True).stdout.strip()
+    count_raw = sh(["/usr/sbin/sysctl", "-n", "hw.logicalcpu"], check=False, capture=True).stdout.strip()
     try:
-        cpu_count = int(cpu_count_raw)
+        cpu_count = int(count_raw)
     except ValueError:
         cpu_count = os.cpu_count() or 1
     try:
@@ -227,121 +228,103 @@ def early_viability_diagnostics(info: dict) -> None:
     for warning in assessment["warnings"]:
         print(f"WARNING: {warning}.")
     if assessment["blockers"]:
-        joined = "; ".join(assessment["blockers"])
         raise SystemExit(
-            f"Mac Brain preflight stopped before large downloads/builds: {joined}. "
-            "Networking is still normal and no containment was applied."
+            "Mac Brain preflight stopped before large downloads/builds: "
+            + "; ".join(assessment["blockers"])
+            + ". Networking is still normal and containment was not applied."
         )
-    print("Basic hardware/storage viability check passed. Mac Brain will measure actual bottlenecks rather than assuming age is the cause.")
 
 
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(8 * 1024 * 1024), b""):
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(8 * 1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
 
 
 def download(url: str, dest: Path) -> None:
-    """Download a large artifact with Big Sur's system curl.
-
-    Using /usr/bin/curl avoids depending on the certificate bundle of whichever
-    Python 3 happens to be installed on this old Mac. The .part file makes a slow
-    or interrupted 1+ GiB model download resumable. SHA-256 verification happens
-    separately before the file is ever trusted.
-    """
+    """Standard-library resumable download; no curl or Python package dependency."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_suffix(dest.suffix + ".part")
-    curl = Path("/usr/bin/curl")
-    if not curl.exists():
-        raise SystemExit("/usr/bin/curl is missing. Network isolation was NOT applied.")
-
-    existing = part.stat().st_size if part.exists() else 0
-    print(f"Downloading {dest.name} ({'resuming' if existing else 'starting'})...")
-    base = [
-        str(curl), "-L", "--fail", "--show-error", "--progress-bar",
-        "--retry", "5", "--retry-delay", "2", "--connect-timeout", "20",
-    ]
-    cmd = base + (["--continue-at", "-"] if existing else []) + ["--output", str(part), url]
-    p = subprocess.run(cmd)
-    if p.returncode != 0 and existing:
-        # Some HTTP intermediaries refuse byte-range resume. Restart cleanly once
-        # rather than making the user diagnose an opaque curl error.
-        print("Resume was not accepted; restarting the model download from zero...")
-        part.unlink(missing_ok=True)
-        p = subprocess.run(base + ["--output", str(part), url])
-    if p.returncode != 0:
-        raise SystemExit("Model download failed after retries. Networking is still normal; rerun python3 install.py later to retry.")
-    part.replace(dest)
+    for attempt in range(5):
+        existing = part.stat().st_size if part.exists() else 0
+        headers = {"User-Agent": "MacBrain/0.7"}
+        if existing:
+            headers["Range"] = f"bytes={existing}-"
+        request = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                status = getattr(response, "status", 200)
+                if existing and status != 206:
+                    part.unlink(missing_ok=True)
+                    existing = 0
+                mode = "ab" if existing else "wb"
+                with part.open(mode) as fh:
+                    while True:
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        fh.write(chunk)
+            part.replace(dest)
+            return
+        except (OSError, urllib.error.URLError) as exc:
+            if attempt == 4:
+                raise SystemExit(f"Download failed after retries: {exc}")
+            time.sleep(2)
 
 
 def verify_command_line_tools() -> None:
-    """Fail early if Apple's compiler toolchain is only a missing-tools stub."""
     xcode = sh(["/usr/bin/xcode-select", "-p"], check=False, capture=True)
     developer_dir = (xcode.stdout or "").strip()
     if xcode.returncode != 0 or not developer_dir:
-        raise SystemExit(
-            "Apple Command Line Tools are not installed/configured. Because git clone already depends on them on Big Sur, "
-            "install the Command Line Tools first, then rerun the same three commands. Network isolation was NOT applied."
-        )
-    for exe in ("/usr/bin/git", "/usr/bin/make", "/usr/bin/cc", "/usr/bin/c++", "/usr/bin/curl"):
+        raise SystemExit("Apple Command Line Tools are required before Mac Brain installation.")
+    for exe in ("/usr/bin/git", "/usr/bin/make", "/usr/bin/cc", "/usr/bin/c++"):
         if not Path(exe).exists():
-            raise SystemExit(f"Required macOS tool missing: {exe}. Network isolation was NOT applied.")
+            raise SystemExit(f"Required macOS tool missing: {exe}")
     compiler = sh(["/usr/bin/cc", "--version"], check=False, capture=True)
     if compiler.returncode != 0:
-        raise SystemExit("Apple clang is not runnable. Command Line Tools appear incomplete; network isolation was NOT applied.")
+        raise SystemExit("Apple clang is not runnable.")
     print(f"Apple Command Line Tools: {developer_dir}")
-    first = ((compiler.stdout or compiler.stderr or "").splitlines() or ["Apple clang"])[0]
-    print(f"Compiler: {first}")
 
 
 def build_runtime() -> None:
     RUNTIME.mkdir(parents=True, exist_ok=True)
     cli = RUNTIME / "llama-cli"
-    if cli.exists():
-        p = sh([str(cli), "--version"], check=False, capture=True)
-        if p.returncode == 0:
-            print("llama-cli already installed and runnable.")
-            return
-        cli.unlink()
+    if cli.exists() and sh([str(cli), "--version"], check=False, capture=True).returncode == 0:
+        print("llama-cli already installed and runnable.")
+        return
+    cli.unlink(missing_ok=True)
     src = VENDOR / "llama.cpp"
     VENDOR.mkdir(parents=True, exist_ok=True)
     if src.exists() and not (src / "Makefile").exists():
-        print("Removing incomplete llama.cpp bootstrap directory...")
         shutil.rmtree(src, ignore_errors=True)
     if not src.exists():
-        print(f"Cloning llama.cpp {LLAMA_TAG} before network isolation...")
+        print(f"Cloning pinned local inference runtime {LLAMA_TAG} before containment...")
         sh(["/usr/bin/git", "clone", "--depth", "1", "--branch", LLAMA_TAG, LLAMA_REPO, str(src)])
-    print("Building CPU-only llama.cpp for this Intel Mac (2 jobs, Metal disabled)...")
     env = os.environ.copy()
     env.update({"LLAMA_MAKEFILE": "1", "GGML_NO_METAL": "1", "GGML_NO_OPENMP": "1"})
-    p = subprocess.run(["/usr/bin/make", "-j2", "llama-cli"], cwd=str(src), env=env)
-    if p.returncode != 0:
-        raise SystemExit("llama.cpp build failed. Xcode Command Line Tools may be missing or incompatible.")
+    result = sh(["/usr/bin/make", "-j2", "llama-cli"], check=False, cwd=src, env=env)
+    if result.returncode != 0:
+        raise SystemExit("Pinned local inference runtime build failed.")
     built = src / "llama-cli"
     if not built.exists():
-        raise SystemExit("llama.cpp build completed but llama-cli was not found.")
+        raise SystemExit("Inference build completed but llama-cli was not found.")
     shutil.copy2(built, cli)
     os.chmod(cli, 0o755)
-    p = sh([str(cli), "--version"], check=False, capture=True)
-    if p.returncode != 0:
-        raise SystemExit("Built llama-cli does not run on this macOS version.")
 
 
 def install_model() -> None:
     if MODEL.exists() and sha256(MODEL) == MODEL_SHA256:
         print("Local model already present and verified.")
         return
-    if MODEL.exists():
-        MODEL.unlink()
+    MODEL.unlink(missing_ok=True)
+    print("Downloading local Qwen model before containment...")
     download(MODEL_URL, MODEL)
-    print("Verifying model SHA-256...")
     actual = sha256(MODEL)
     if actual != MODEL_SHA256:
         MODEL.unlink(missing_ok=True)
         raise SystemExit(f"Model checksum mismatch: got {actual}")
-    print("Model verified.")
 
 
 def write_config(info: dict, ssh_source: str) -> None:
@@ -359,62 +342,49 @@ def write_config(info: dict, ssh_source: str) -> None:
         "model_path": str(MODEL),
         "llama_cli": str(RUNTIME / "llama-cli"),
         "quarantine_dir": str(APP / "quarantine"),
+        "git_repos_dir": str(APP / "git"),
+        "python_series": "3.14",
     }
-    (APP / "config.json").write_text(json.dumps(config, indent=2) + "\n")
+    (APP / "config.json").write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.chmod(APP / "config.json", 0o600)
-    # A fresh/re-run install always returns to the explicit two-stage handoff. Cheap proof-of-life
-    # monitoring may run before takeover, but autonomous deep scans/AI do not start until
-    # demonstration mode has passed AND low-level containment has been armed successfully.
-    try:
-        (APP / "mission.active").unlink()
-    except FileNotFoundError:
-        pass
+    (APP / "mission.active").unlink(missing_ok=True)
     network = {
         "gateway_before_isolation": info.get("gateway", ""),
         "interface": info.get("interface", "en0"),
         "authorized_ssh_source": ssh_source,
         "network_service": info.get("network_service", ""),
     }
-    (APP / "install-network.json").write_text(json.dumps(network, indent=2) + "\n")
+    (APP / "install-network.json").write_text(json.dumps(network, indent=2) + "\n", encoding="utf-8")
     os.chmod(APP / "install-network.json", 0o600)
 
 
 def write_launch_agent(info: dict) -> Path:
-    src = (ROOT / "launchd" / "com.macbrain.performancehunter.plist.template").read_text()
+    src = (ROOT / "launchd" / "com.macbrain.performancehunter.plist.template").read_text(encoding="utf-8")
     src = src.replace("__PYTHON__", info["python"]).replace("__REPO__", str(ROOT)).replace("__HOME__", str(HOME))
     agents = HOME / "Library" / "LaunchAgents"
     agents.mkdir(parents=True, exist_ok=True)
     dest = agents / "com.macbrain.performancehunter.plist"
-    dest.write_text(src)
+    dest.write_text(src, encoding="utf-8")
     sh(["/bin/launchctl", "unload", str(dest)], check=False)
     return dest
 
 
 def proof_of_life(timeout: float = 120.0) -> None:
-    """Start the background worker and wait for it to record a NEW evidence sample.
-
-    The plist intentionally has no RunAtLoad, so `launchctl load` alone never runs it;
-    launch_worker() loads and explicitly starts it. Waiting for a fresh sample written
-    by the worker (not the earlier first-mission pass) proves the worker really runs.
-    """
     from macbrain import db
     from macbrain.lifecycle import CONTAINMENT_MARKER, launch_worker
-
     if CONTAINMENT_MARKER.exists():
-        # Re-install on an already-armed Mac: the worker deliberately exits unless the
-        # user has run `macbrain start` this boot, so it cannot be probed here.
-        print("Containment is already armed; the worker will be verified by `macbrain start`.")
+        print("Containment is already armed; worker verification waits for explicit start.")
         return
     started = time.time()
     if not launch_worker():
-        raise SystemExit("Background worker did not start. Network isolation was NOT applied.")
+        raise SystemExit("Background worker did not start. Containment was NOT applied.")
     while time.time() - started < timeout:
         recent = db.recent_samples(1)
         if recent and float(recent[0].get("ts", 0)) >= started:
-            print("Performance Hunter background worker is running and recording evidence.")
+            print("Performance Hunter background worker is recording evidence.")
             return
         time.sleep(2)
-    raise SystemExit("Background worker started but recorded no evidence. Network isolation was NOT applied.")
+    raise SystemExit("Background worker recorded no fresh evidence. Containment was NOT applied.")
 
 
 def _ssh_listening() -> bool:
@@ -429,85 +399,83 @@ def ensure_ssh() -> None:
     if _ssh_listening():
         print("SSH is already listening locally.")
         return
-    raw = sh(["sudo", "-n", "/usr/sbin/systemsetup", "-getremotelogin"], check=False, capture=True)
-    text = ((raw.stdout or "") + (raw.stderr or "")).strip()
-    print(f"Remote Login: {text or 'unable to determine'}")
-    print("Enabling Remote Login (SSH)...")
     sh(["sudo", "-n", "/usr/sbin/systemsetup", "-setremotelogin", "on"], check=False)
     time.sleep(1)
     if not _ssh_listening():
-        # Big Sur can require Full Disk Access for systemsetup. Try loading Apple's
-        # stock ssh launch daemon directly, but still verify before isolation.
         sh(["sudo", "-n", "/bin/launchctl", "load", "-w", "/System/Library/LaunchDaemons/ssh.plist"], check=False)
         time.sleep(1)
     if not _ssh_listening():
-        raise SystemExit(
-            "SSH is not listening on port 22. Enable System Preferences > Sharing > Remote Login, then rerun python3 install.py. Network isolation was NOT applied."
-        )
-    print("SSH listener verified on localhost:22.")
+        raise SystemExit("SSH is not listening on port 22. Enable Remote Login and rerun install.py.")
 
 
 def arm_network_lock(ssh_source: str, interface: str, gateway: str, network_service: str, local_ip: str, netmask: str) -> None:
-    print("\nMac Brain passed demonstration mode. The next step is the low-level containment handoff.")
+    print("\nThe next step applies the low-level inbound-only containment boundary.")
     print(f"Controller allowed to initiate SSH: {ssh_source}")
-    print("Mac Brain will block all other new IPv4/IPv6 traffic, remove the IPv4 default route, and disable IPv6 on the active network service when possible.")
-    print("SSH reply packets are necessarily outbound packets belonging to the inbound SSH state; Mac Brain will not be allowed to initiate its own network connection.")
-    print("Arming does NOT start the AI. Mac Brain stays OFF until you type START MAC BRAIN.")
     phrase = input("Type ARM MAC BRAIN to apply network containment: ").strip()
     if phrase != "ARM MAC BRAIN":
         raise SystemExit("Mac Brain was not armed. Networking remains normal and Mac Brain is OFF.")
     if not all((gateway, network_service, local_ip, netmask)):
-        raise SystemExit("Could not identify the active IPv4 network service completely. Refusing takeover because hard no-egress containment cannot be guaranteed.")
+        raise SystemExit("Active IPv4 service is incomplete; refusing takeover.")
     cmd = [
-        "sudo", "-n", "/bin/bash", str(ROOT / "scripts" / "network_lock.sh"),
-        "--source", ssh_source, "--interface", interface,
-        "--gateway", gateway, "--service", network_service,
-        "--ip", local_ip, "--netmask", netmask,
+        "sudo", "-n", str(Path(sys.executable).resolve()), str(ROOT / "scripts" / "network_lock.py"),
+        "--source", ssh_source,
+        "--interface", interface,
+        "--gateway", gateway,
+        "--service", network_service,
+        "--ip", local_ip,
+        "--netmask", netmask,
     ]
     sh(cmd)
 
 
 def run_repo_self_test(info: dict) -> None:
-    print("Running Mac Brain repository self-tests before installation...")
+    print("Running repository policy and self-tests before installation...")
+    policy = subprocess.run(
+        [info["python"], str(ROOT / "tools" / "repo_policy.py")],
+        cwd=str(ROOT), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120,
+    )
+    if policy.returncode != 0:
+        print(policy.stdout or "")
+        raise SystemExit("Mac Brain repository policy failed. Nothing has been isolated.")
     env = os.environ.copy()
     env["MACBRAIN_HOME"] = str(APP / "selftest-state")
-    p = subprocess.run(
+    tests = subprocess.run(
         [info["python"], "-m", "unittest", "discover", "-s", "tests", "-q"],
-        cwd=str(ROOT), env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120,
+        cwd=str(ROOT), env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180,
     )
-    if p.returncode != 0:
-        print(p.stdout or "")
-        raise SystemExit("Mac Brain self-tests failed. Nothing has been isolated; fix the repo before continuing.")
+    if tests.returncode != 0:
+        print(tests.stdout or "")
+        raise SystemExit("Mac Brain self-tests failed. Nothing has been isolated.")
     shutil.rmtree(APP / "selftest-state", ignore_errors=True)
-    print("Repository self-tests passed.")
 
 
 def runtime_smoke_test(info: dict) -> None:
-    print("Smoke-testing the local Qwen model before network isolation...")
+    from macbrain.llm import llama_cli_args
     cli = RUNTIME / "llama-cli"
     prompt = "<|im_start|>system\nAnswer with exactly: MAC BRAIN AWAKE<|im_end|>\n<|im_start|>user\nWake up.<|im_end|>\n<|im_start|>assistant\n"
-    # Same argv builder as the runtime so the smoke test exercises the real invocation
-    # (including -no-cnv; otherwise llama-cli waits for keyboard input here).
-    from macbrain.llm import llama_cli_args
     cmd = llama_cli_args(cli, MODEL, prompt, threads=2, context=512, predict=12, temp="0")
     try:
-        p = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=420, check=False)
+        result = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=420, check=False)
     except subprocess.TimeoutExpired:
-        raise SystemExit("Local-model smoke test timed out. Network isolation was NOT applied.")
-    output = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
-    # Check stdout only: llama.cpp logs on stderr can echo prompt text and fake a pass.
-    if p.returncode != 0 or "MAC BRAIN" not in (p.stdout or "").upper():
-        print(output[-4000:])
-        raise SystemExit("Local-model smoke test failed. Network isolation was NOT applied.")
-    print("Local Qwen inference smoke test passed.")
+        raise SystemExit("Local-model smoke test timed out. Containment was NOT applied.")
+    if result.returncode != 0 or "MAC BRAIN" not in (result.stdout or "").upper():
+        raise SystemExit("Local-model smoke test failed. Containment was NOT applied.")
 
 
 def install_command_wrapper(info: dict) -> None:
-    wrapper = APP / "macbrain-wrapper"
+    wrapper = APP / "macbrain-wrapper.py"
+    python = str(Path(info["python"]).resolve())
     wrapper.write_text(
-        "#!/bin/sh\n"
-        + f"cd {json.dumps(str(ROOT))} || exit 1\n"
-        + f"exec {json.dumps(info['python'])} -m macbrain \"$@\"\n"
+        f"#!{python}\n"
+        "from __future__ import annotations\n"
+        "import os\n"
+        "import sys\n"
+        f"ROOT = {str(ROOT)!r}\n"
+        "os.chdir(ROOT)\n"
+        "sys.path.insert(0, ROOT)\n"
+        "from macbrain.__main__ import main\n"
+        "raise SystemExit(main())\n",
+        encoding="utf-8",
     )
     os.chmod(wrapper, 0o755)
     target = Path("/usr/local/bin/macbrain")
@@ -515,11 +483,14 @@ def install_command_wrapper(info: dict) -> None:
     sh(["sudo", "-n", "/bin/cp", str(wrapper), str(target)])
     sh(["sudo", "-n", "/usr/sbin/chown", "root:wheel", str(target)])
     sh(["sudo", "-n", "/bin/chmod", "755", str(target)])
-    print("Installed /usr/local/bin/macbrain command.")
+
+
+def validate_python_programs() -> None:
+    for path in [ROOT / "install.py", *sorted((ROOT / "macbrain").glob("*.py")), *sorted((ROOT / "scripts").glob("*.py")), *sorted((ROOT / "tools").glob("*.py"))]:
+        py_compile.compile(str(path), doraise=True)
 
 
 def enable_wake_for_network() -> None:
-    # Best effort: supported Intel Macs can wake for network access while on power.
     sh(["sudo", "-n", "/usr/bin/pmset", "-a", "womp", "1"], check=False)
 
 
@@ -529,79 +500,63 @@ def unload_agent() -> None:
 
 
 def main() -> int:
+    require_python_baseline()
     parser = argparse.ArgumentParser(description="Install Speed Up Mac Brain on the old Mac.")
     parser.add_argument("--allow-sip-disabled", action="store_true")
     args = parser.parse_args()
 
-    # First interactive event: standard sudo authentication. Python never receives the password.
     keepalive = sudo_auth()
     armed = False
     try:
         info = preflight(args.allow_sip_disabled)
-        ssh_source = ""
-        mem_gb = info.get("memory_bytes", 0) / 1024**3 if info.get("memory_bytes") else 0
-        print(f"Target profile: macOS {info.get('macos')}, {mem_gb:.1f} GB RAM. Controller SSH host will be selected only after demonstration mode.")
         APP.mkdir(parents=True, exist_ok=True)
         (APP / "quarantine").mkdir(exist_ok=True)
+        (APP / "git").mkdir(exist_ok=True)
 
+        validate_python_programs()
         verify_command_line_tools()
         run_repo_self_test(info)
         early_viability_diagnostics(info)
         build_runtime()
         install_model()
-        write_config(info, ssh_source)
+        write_config(info, "")
         install_command_wrapper(info)
         ensure_ssh()
         enable_wake_for_network()
         write_launch_agent(info)
-
         runtime_smoke_test(info)
-        print("\nRunning Mac Brain's first mission baseline (non-destructive)...")
-        sh([info["python"], "-m", "macbrain", "first-mission", "--no-llm"], cwd=ROOT)
 
-        print("\nProof-of-life test: starting the background hunter before isolation...")
+        sh([info["python"], "-m", "macbrain", "first-mission", "--no-llm"], cwd=ROOT)
         proof_of_life()
         doctor = sh([info["python"], "-m", "macbrain", "doctor"], check=False, capture=True, cwd=ROOT)
         print((doctor.stdout or "").strip())
         if doctor.returncode != 0:
-            raise SystemExit("Background proof-of-life failed. Network isolation was NOT applied.")
+            raise SystemExit("Background proof-of-life failed. Containment was NOT applied.")
         unload_agent()
-        print("Background proof-of-life passed.")
 
-        print("\nMac Brain will now prove useful while ordinary networking is STILL NORMAL.")
         demo = subprocess.run([info["python"], "-m", "macbrain", "prearm-console"], cwd=str(ROOT))
         if demo.returncode != 0:
-            raise SystemExit("Takeover was not approved. Networking remains normal and the autonomous mission did not start.")
+            raise SystemExit("Takeover was not approved. Networking remains normal.")
 
-        # Only after Mac Brain has demonstrated useful local reasoning do we ask which
-        # single controller host will remain reachable through SSH after takeover.
         ssh_source = authorized_ssh_source(info)
         write_config(info, ssh_source)
-
-        # Validate shell syntax before the one operation that can cut networking.
-        sh(["/bin/bash", "-n", str(ROOT / "scripts" / "network_lock.sh")])
-        sh(["/bin/bash", "-n", str(ROOT / "scripts" / "network_unlock.sh")])
+        validate_python_programs()
         arm_network_lock(
-            ssh_source, info["interface"], info.get("gateway", ""), info.get("network_service", ""),
-            info.get("local_ip", ""), info.get("netmask", ""),
+            ssh_source,
+            info["interface"],
+            info.get("gateway", ""),
+            info.get("network_service", ""),
+            info.get("local_ip", ""),
+            info.get("netmask", ""),
         )
-        # Containment is armed, but Mac Brain stays OFF until the user explicitly
-        # starts it (see LIFECYCLE.md). set_mission_active(True) without user
-        # authorization is refused by design, so never claim the mission is active here.
         unload_agent()
         armed = True
-        # Do not keep an administrator sudo timestamp alive for the interactive console.
         keepalive.set()
 
         print("\nNetwork containment is active and verified. Mac Brain is installed and OFF.")
-        print("To start the SPEED UP MAC BRAIN mission now, type the start code word below.")
-        print("(Anything else leaves it OFF; you can start it later with: macbrain start)")
         subprocess.run([info["python"], "-m", "macbrain", "start"], cwd=str(ROOT))
         console = subprocess.run([info["python"], "-m", "macbrain", "console"], cwd=str(ROOT))
-        if console.returncode != 0:
-            print("Mac Brain console exited with an error. Reconnect later with: macbrain console")
-            return console.returncode
-        return 0
+        return console.returncode
     finally:
         if not armed:
             unload_agent()
