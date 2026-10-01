@@ -83,10 +83,11 @@ class GitStoreTests(unittest.TestCase):
         self.assertEqual(info["max_receive_bytes"], gitstore.MAX_RECEIVE_BYTES)
 
     def test_capacity_is_filesystem_level_and_reserves_at_least_one_gib(self):
+        gib = 1024 * 1024 * 1024
         usage = type("Usage", (), {
-            "total": 8 * gitstore._GIB,
-            "used": 6 * gitstore._GIB,
-            "free": 2 * gitstore._GIB,
+            "total": 8 * gib,
+            "used": 6 * gib,
+            "free": 2 * gib,
         })()
         with mock.patch.object(gitstore.shutil, "disk_usage", return_value=usage):
             capacity = gitstore.storage_capacity()
