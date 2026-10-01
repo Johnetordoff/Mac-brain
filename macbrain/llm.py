@@ -78,7 +78,6 @@ def llama_cli_args(cli: Path, model: Path, prompt: str, *, threads: int, context
         "-n", str(predict),
         "-ngl", "0",
         "--temp", temp,
-        "-no-cnv",
         "--no-display-prompt",
         "-p", prompt,
     ]

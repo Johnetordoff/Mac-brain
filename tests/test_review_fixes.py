@@ -18,9 +18,11 @@ class FakeResult:
 
 
 class LlamaInvocationTests(unittest.TestCase):
-    def test_conversation_mode_is_disabled(self):
+    def test_conversation_mode_is_not_enabled(self):
         args = llm.llama_cli_args(Path("/x/llama-cli"), Path("/x/m.gguf"), "hi", threads=2, context=2048, predict=10, temp="0")
-        self.assertIn("-no-cnv", args)
+        self.assertNotIn("-cnv", args)
+        self.assertNotIn("--conversation", args)
+        self.assertNotIn("-no-cnv", args)
         self.assertEqual(args[-2:], ["-p", "hi"])
 
     def test_generate_never_shares_the_terminal_and_strips_end_marker(self):
@@ -36,7 +38,8 @@ class LlamaInvocationTests(unittest.TestCase):
                 out = llm.generate([{"role": "user", "content": "why slow?"}])
         self.assertEqual(out, "Disk is full.")
         self.assertIs(run.call_args.kwargs["stdin"], llm.subprocess.DEVNULL)
-        self.assertIn("-no-cnv", run.call_args.args[0])
+        self.assertNotIn("-cnv", run.call_args.args[0])
+        self.assertNotIn("-no-cnv", run.call_args.args[0])
 
 
 class EvidenceBudgetTests(unittest.TestCase):

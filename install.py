@@ -27,7 +27,8 @@ VENDOR = APP / "vendor"
 MODEL = MODELS / "qwen2.5-1.5b-instruct-q4_k_m.gguf"
 MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf?download=true"
 MODEL_SHA256 = "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e"
-LLAMA_TAG = "b4528"
+LLAMA_TAG = "b4400"
+LLAMA_COMMIT = "6e1531aca5ed17f078973b4700fcdadbda4a34a5"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
 REQUIRED_PYTHON = (3, 14)
 
@@ -288,6 +289,17 @@ def verify_command_line_tools() -> None:
     print(f"Apple Command Line Tools: {developer_dir}")
 
 
+def llama_checkout_matches(src: Path) -> bool:
+    """Return True only for the exact llama.cpp revision Mac Brain supports."""
+    if not (src / "Makefile").exists():
+        return False
+    head = sh(
+        ["/usr/bin/git", "-C", str(src), "rev-parse", "HEAD"],
+        check=False, capture=True,
+    )
+    return head.returncode == 0 and (head.stdout or "").strip() == LLAMA_COMMIT
+
+
 def build_runtime() -> None:
     RUNTIME.mkdir(parents=True, exist_ok=True)
     cli = RUNTIME / "llama-cli"
@@ -297,16 +309,25 @@ def build_runtime() -> None:
     cli.unlink(missing_ok=True)
     src = VENDOR / "llama.cpp"
     VENDOR.mkdir(parents=True, exist_ok=True)
-    if src.exists() and not (src / "Makefile").exists():
+    if src.exists() and not llama_checkout_matches(src):
+        print(f"Replacing stale/incomplete llama.cpp checkout with pinned {LLAMA_TAG}...")
         shutil.rmtree(src, ignore_errors=True)
     if not src.exists():
         print(f"Cloning pinned local inference runtime {LLAMA_TAG} before containment...")
         sh(["/usr/bin/git", "clone", "--depth", "1", "--branch", LLAMA_TAG, LLAMA_REPO, str(src)])
+    if not llama_checkout_matches(src):
+        raise SystemExit(
+            f"llama.cpp checkout is not the expected pinned revision {LLAMA_COMMIT}. "
+            "Networking is still normal; rerun python3.14 install.py to retry."
+        )
     env = os.environ.copy()
     env.update({"LLAMA_MAKEFILE": "1", "GGML_NO_METAL": "1", "GGML_NO_OPENMP": "1"})
     result = sh(["/usr/bin/make", "-j2", "llama-cli"], check=False, cwd=src, env=env)
     if result.returncode != 0:
-        raise SystemExit("Pinned local inference runtime build failed.")
+        raise SystemExit(
+            f"llama.cpp {LLAMA_TAG} build failed. Networking is still normal; "
+            "review the compiler/linker output above."
+        )
     built = src / "llama-cli"
     if not built.exists():
         raise SystemExit("Inference build completed but llama-cli was not found.")
