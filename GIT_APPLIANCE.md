@@ -8,6 +8,16 @@ The local Qwen model is **not part of the Git path**. It does not decide what to
 
 The operative rule is simple: **Mac Brain stores only data that another machine or a person explicitly hands to it.**
 
+## Python-only implementation
+
+The vault follows [PYTHON_POLICY.md](PYTHON_POLICY.md):
+
+- Mac Brain's vault/control logic is Python 3.14 standard-library-only;
+- the generated Git `pre-receive` storage guard is a Python program using the exact Mac Brain interpreter, not a shell script;
+- there is no shell wrapper, shell hook, or package dependency in the vault path;
+- Git itself remains the system Git transport/storage engine, invoked by Python or by an inbound SSH Git request;
+- the local model is not used to generate or execute Git control code.
+
 ## Non-negotiable network boundary
 
 After containment:
@@ -36,31 +46,31 @@ The first implementation therefore uses conservative deterministic guards:
 - repository inspection happens only when `macbrain git info NAME` is explicitly requested;
 - Mac Brain never automatically deletes an old brain or repository to make room.
 
-The numerical limits are intentionally conservative starting points. They can be changed deliberately at the physical machine later if real brain-capsule sizes show that another value is appropriate. They are not something the model may adjust on its own.
+The numerical limits are deliberately conservative starting points. They can be changed deliberately at the physical machine later if real brain-capsule sizes show that another value is appropriate. They are not something the model may adjust on its own.
 
 ## Commands
 
 Check whether the vault has room before sending anything:
 
-```bash
+```text
 macbrain git capacity
 ```
 
 Create an empty receiving repository:
 
-```bash
+```text
 macbrain git create brain-clone0
 ```
 
 Cheaply list repository names:
 
-```bash
+```text
 macbrain git list
 ```
 
 Explicitly inspect one repository:
 
-```bash
+```text
 macbrain git info brain-clone0
 ```
 
@@ -70,7 +80,7 @@ There is deliberately no "fetch", "pull remote", "sync peers", or network-import
 
 The controller prepares the data. Then, with `MAC_BRAIN_LAN_IP` and the Mac username substituted:
 
-```bash
+```text
 git remote add macbrain USER@MAC_BRAIN_LAN_IP:.macbrain/git/brain-clone0.git
 git push macbrain main
 ```
@@ -81,7 +91,7 @@ For a `.brain` payload, the intended pattern is similarly selective: another mac
 
 To read it back later, the controller initiates the connection again:
 
-```bash
+```text
 git clone USER@MAC_BRAIN_LAN_IP:.macbrain/git/brain-clone0.git
 ```
 
