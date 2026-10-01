@@ -1,6 +1,8 @@
+import io
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 os.environ["MACBRAIN_HOME"] = tempfile.mkdtemp(prefix="macbrain-console-")
@@ -29,14 +31,16 @@ class ConsoleTests(unittest.TestCase):
         set_mission_active(False)
         self.assertFalse(mission_active())
 
-
     def test_demo_can_reason_then_takeover_without_starting_mission(self):
+        output = io.StringIO()
         with patch("builtins.input", side_effect=["can you speed this up?", "TAKE OVER MAC BRAIN"]), \
-             patch("macbrain.console.agent_ask", return_value="Observed: test evidence") as ask:
+             patch("macbrain.console.agent_ask", return_value="Observed: test evidence") as ask, \
+             redirect_stdout(output):
             rc = run_prearm_console()
         self.assertEqual(rc, 0)
         self.assertTrue(ask.called)
         self.assertFalse(mission_active())
+        self.assertIn("MAC BRAIN DEMONSTRATION STAGE", output.getvalue())
 
     def test_reports_are_ordered_and_incremental(self):
         start = db.latest_report_id()
