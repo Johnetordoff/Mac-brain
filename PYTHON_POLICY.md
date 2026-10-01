@@ -4,23 +4,29 @@ This is a repository invariant, not a preference.
 
 ## Executable source
 
-All Mac Brain executable source code is Python.
+All **Mac Brain application, control, containment, tooling, test, and generated executable source** is Python.
 
-The only source-language exceptions are:
+The only authored-source exceptions are:
 
 1. **Browser JavaScript** (`.js`/`.mjs`) when code is explicitly part of a browser surface, and only under a `browser/` or `web/` tree.
-2. **A Python C extension** (`.c`/`.h`) when a measured performance bottleneck cannot reasonably be solved in Python. C extension source must live under `native/` and the bottleneck must be documented in `native/BOTTLENECK.md` before the C source is accepted.
+2. **A Python C extension** (`.c`/`.h`) when a measured performance bottleneck cannot reasonably be solved in Python. C-extension source must live under `native/` and the bottleneck must be documented in `native/BOTTLENECK.md` before C source is accepted.
 3. Declarative data/configuration formats such as JSON, TOML, YAML, plist, XML, Markdown, and GitHub Actions YAML. These are not executable implementation languages.
 
-Shell scripts, AppleScript, Ruby, Perl, TypeScript, standalone C/C++, and other implementation languages are not permitted.
+Shell scripts, AppleScript, Ruby, Perl, TypeScript, standalone C/C++, and other implementation languages are not permitted as Mac Brain source.
 
-Mac Brain may invoke fixed macOS system programs (for example `pfctl`, `networksetup`, `launchctl`, Git, and SSH) from Python with `subprocess`. It may not invoke a shell interpreter, use `shell=True`, or generate a shell program as an intermediate layer.
+Mac Brain may invoke fixed operating-system tools such as `pfctl`, `networksetup`, `launchctl`, Git, and SSH from Python using argument arrays. It may not invoke a shell interpreter, use `shell=True`, or generate a shell program as an intermediate layer.
+
+### Existing model runtime boundary
+
+The existing Qwen path currently executes a pinned native `llama.cpp` binary built before containment. That binary is third-party model-runtime infrastructure, not Mac Brain-authored application logic and not a Python package dependency.
+
+This is the **one existing native runtime boundary that this PR does not pretend to eliminate**. It must not be used as precedent for adding more native application logic or third-party Python libraries. If the requirement is later interpreted literally as “no non-Python executable anywhere, including the model engine,” the Qwen runtime must be replaced or removed; this policy does not falsely label `llama.cpp` as Python.
 
 ## Python baseline
 
 Mac Brain currently requires **CPython 3.14.x**.
 
-As of October 1, 2026, Python 3.14 is the current stable feature series published by Python.org; 3.15 is still a pre-release at the time this policy was written. The supported series is deliberately explicit: when the project chooses a new mainstream stable series, updating this baseline takes priority over feature work.
+The supported series is explicit. When the project deliberately moves to a newer mainstream stable CPython series, updating this baseline takes priority over feature work.
 
 `pyproject.toml`, runtime checks, and CI must agree on the same Python series.
 
