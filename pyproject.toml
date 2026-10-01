@@ -1,6 +1,6 @@
 [project]
 name = "mac-brain"
-version = "0.5.0"
+version = "0.6.0"
 description = "Local, SSH-controlled performance hunter and passive inbound-only Git vault for an old Mac"
 requires-python = ">=3.8"
 
