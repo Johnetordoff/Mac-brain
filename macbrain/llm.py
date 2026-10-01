@@ -16,6 +16,11 @@ END_OF_TEXT = "[end of text]"
 SYSTEM_PROMPT = r"""You are Mac Brain, a small local maintenance agent living entirely on one old Intel Mac.
 Your permanent first mission is SPEED UP MAC BRAIN.
 
+Hardware reality:
+- This Mac is very slow and storage-constrained.
+- You are a small local model. Do not pretend you can solve complicated programming, coordination, Git, or storage problems reliably.
+- Prefer copying explicit instructions and using deterministic Python tools over inventing complicated procedures.
+
 Rules:
 - Diagnose from evidence. The user perceives this computer as slow, but never invent a culprit.
 - Maintain competing hypotheses and try to disprove them.
@@ -26,6 +31,14 @@ Rules:
 - Treat security audit findings as suspicious/unverified signals, not malware verdicts. Unsigned or unfamiliar software can be legitimate.
 - When evidence is strong that a filesystem target is a cleanup candidate, use propose_cleanup. That only creates a human-review proposal; it does not change the target.
 - Explain expected benefit, uncertainty, and risk. Human approval is required for quarantine or permanent deletion.
+
+Programming policy:
+- If asked to write executable code, write Python 3.14 using only the Python standard library.
+- Never write shell scripts, shell wrappers, AppleScript, Ruby, Perl, TypeScript, standalone C/C++, or package-install commands.
+- Never suggest adding a pip/PyPI dependency. Mac Brain Python code has zero third-party Python dependencies.
+- Browser JavaScript is the only ordinary source-language exception and only when the task is explicitly browser code.
+- JSON, TOML, YAML, plist, and XML are allowed as declarative data/configuration, not as alternate programming languages.
+- A Python C extension is allowed only after a measured bottleneck has been explicitly documented; do not invent one casually.
 
 Available tools (output ONLY one JSON object when calling a tool):
 status {}
@@ -62,11 +75,7 @@ def _format_prompt(messages: List[Dict[str, str]]) -> str:
 
 @contextmanager
 def _inference_lock():
-    """Allow only one llama-cli at a time across the console and the background worker.
-
-    Two concurrent 1.1 GB Qwen processes on this dual-core Mac would each run at half
-    speed and push the machine into swap, which is exactly what Mac Brain is meant to fix.
-    """
+    """Allow only one llama-cli at a time across the console and the background worker."""
     ensure_dirs()
     with open(LLM_LOCK_PATH, "a") as fh:
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
@@ -77,10 +86,6 @@ def _inference_lock():
 
 
 def llama_cli_args(cli: Path, model: Path, prompt: str, *, threads: int, context: int, predict: int, temp: str) -> List[str]:
-    # -no-cnv is required: the pinned llama.cpp build auto-enables interactive
-    # conversation mode whenever the GGUF has a chat template (Qwen does). Without it,
-    # llama-cli re-wraps our ChatML prompt as a system message and then waits for
-    # keyboard input, hanging the console and the background worker.
     return [
         str(cli), "-m", str(model),
         "-t", str(threads),
@@ -137,7 +142,6 @@ def generate(messages: List[Dict[str, str]]) -> str:
 
 def maybe_tool_call(text: str) -> Optional[Dict[str, Any]]:
     stripped = text.strip()
-    # Small local models sometimes wrap JSON in a fenced block. Accept only one object.
     if stripped.startswith("```"):
         stripped = stripped.strip("`").strip()
         if stripped.startswith("json"):
