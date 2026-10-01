@@ -111,6 +111,12 @@ class GitStoreTests(unittest.TestCase):
                 gitstore.create_repo("no-space")
         self.assertFalse((self.root / "no-space.git").exists())
 
+    def test_guard_setup_failure_removes_half_configured_repo(self):
+        with mock.patch.object(gitstore, "_install_storage_guard", side_effect=RuntimeError("guard failed")):
+            with self.assertRaises(RuntimeError):
+                gitstore.create_repo("unsafe")
+        self.assertFalse((self.root / "unsafe.git").exists())
+
     def test_git_vault_has_no_network_import_operation(self):
         self.assertFalse(hasattr(gitstore, "import_local_repo"))
 
