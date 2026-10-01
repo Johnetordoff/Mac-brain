@@ -119,16 +119,21 @@ def anchor_text(args: argparse.Namespace) -> str:
     )
 
 
+def _is_apple_filter_anchor(line: str) -> bool:
+    """Recognize Apple's wildcard PF filter anchor without regex escaping ambiguity."""
+    stripped = line.strip()
+    return stripped.startswith('anchor "com.apple/*"')
+
+
 def build_pf_config() -> None:
     original = PF_CONF.read_text(encoding="utf-8").splitlines()
     output: list[str] = []
     inserted = False
-    apple_anchor = re.compile(r'^\s*anchor\s+"com\\.apple/\\\*"')
     for line in original:
         stripped = line.strip()
         if stripped.startswith('anchor "macbrain"') or stripped.startswith('load anchor "macbrain"'):
             continue
-        if not inserted and apple_anchor.match(line):
+        if not inserted and _is_apple_filter_anchor(line):
             output.append('anchor "macbrain"')
             inserted = True
         output.append(line)
@@ -237,7 +242,7 @@ def verify(args: argparse.Namespace) -> None:
     for index, line in enumerate(PF_CONF.read_text(encoding="utf-8").splitlines(), start=1):
         if macbrain_line is None and line.strip() == 'anchor "macbrain"':
             macbrain_line = index
-        if apple_line is None and re.match(r'^\s*anchor\s+"com\\.apple/\\\*"', line):
+        if apple_line is None and _is_apple_filter_anchor(line):
             apple_line = index
     if macbrain_line is None:
         raise RuntimeError("Mac Brain PF anchor is missing from pf.conf")
