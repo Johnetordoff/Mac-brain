@@ -24,7 +24,8 @@ VENDOR = APP / "vendor"
 MODEL = MODELS / "qwen2.5-1.5b-instruct-q4_k_m.gguf"
 MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf?download=true"
 MODEL_SHA256 = "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e"
-LLAMA_TAG = "b4528"
+LLAMA_TAG = "b4400"
+LLAMA_COMMIT = "6e1531aca5ed17f078973b4700fcdadbda4a34a5"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
 
 
@@ -296,6 +297,17 @@ def verify_command_line_tools() -> None:
     print(f"Compiler: {first}")
 
 
+def llama_checkout_matches(src: Path) -> bool:
+    """Return True only for the exact llama.cpp revision Mac Brain supports."""
+    if not (src / "Makefile").exists():
+        return False
+    head = sh(
+        ["/usr/bin/git", "-C", str(src), "rev-parse", "HEAD"],
+        check=False, capture=True,
+    )
+    return head.returncode == 0 and (head.stdout or "").strip() == LLAMA_COMMIT
+
+
 def build_runtime() -> None:
     RUNTIME.mkdir(parents=True, exist_ok=True)
     cli = RUNTIME / "llama-cli"
@@ -307,18 +319,26 @@ def build_runtime() -> None:
         cli.unlink()
     src = VENDOR / "llama.cpp"
     VENDOR.mkdir(parents=True, exist_ok=True)
-    if src.exists() and not (src / "Makefile").exists():
-        print("Removing incomplete llama.cpp bootstrap directory...")
+    if src.exists() and not llama_checkout_matches(src):
+        print(f"Replacing stale/incomplete llama.cpp checkout with pinned {LLAMA_TAG}...")
         shutil.rmtree(src, ignore_errors=True)
     if not src.exists():
         print(f"Cloning llama.cpp {LLAMA_TAG} before network isolation...")
         sh(["/usr/bin/git", "clone", "--depth", "1", "--branch", LLAMA_TAG, LLAMA_REPO, str(src)])
+    if not llama_checkout_matches(src):
+        raise SystemExit(
+            f"llama.cpp checkout is not the expected pinned revision {LLAMA_COMMIT}. "
+            "Networking is still normal; rerun python3 install.py to retry."
+        )
     print("Building CPU-only llama.cpp for this Intel Mac (2 jobs, Metal disabled)...")
     env = os.environ.copy()
     env.update({"LLAMA_MAKEFILE": "1", "GGML_NO_METAL": "1", "GGML_NO_OPENMP": "1"})
     p = subprocess.run(["/usr/bin/make", "-j2", "llama-cli"], cwd=str(src), env=env)
     if p.returncode != 0:
-        raise SystemExit("llama.cpp build failed. Xcode Command Line Tools may be missing or incompatible.")
+        raise SystemExit(
+            f"llama.cpp {LLAMA_TAG} build failed. Networking is still normal; "
+            "review the compiler/linker output above."
+        )
     built = src / "llama-cli"
     if not built.exists():
         raise SystemExit("llama.cpp build completed but llama-cli was not found.")
@@ -486,8 +506,8 @@ def runtime_smoke_test(info: dict) -> None:
     print("Smoke-testing the local Qwen model before network isolation...")
     cli = RUNTIME / "llama-cli"
     prompt = "<|im_start|>system\nAnswer with exactly: MAC BRAIN AWAKE<|im_end|>\n<|im_start|>user\nWake up.<|im_end|>\n<|im_start|>assistant\n"
-    # Same argv builder as the runtime so the smoke test exercises the real invocation
-    # (including -no-cnv; otherwise llama-cli waits for keyboard input here).
+    # Same argv builder as the runtime so the smoke test exercises the real invocation.
+    # stdin is disconnected below so the local model can never wait on keyboard input.
     from macbrain.llm import llama_cli_args
     cmd = llama_cli_args(cli, MODEL, prompt, threads=2, context=512, predict=12, temp="0")
     try:
