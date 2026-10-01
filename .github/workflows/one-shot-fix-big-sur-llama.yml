@@ -26,44 +26,18 @@ jobs:
           path = Path('install.py')
           text = path.read_text()
 
-          old_constants = '''LLAMA_TAG = "b4528"\nLLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"'''
-          new_constants = '''LLAMA_TAG = "b4400"\nLLAMA_COMMIT = "6e1531aca5ed17f078973b4700fcdadbda4a34a5"\nLLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"'''
+          old_constants = 'LLAMA_TAG = "b4528"\nLLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"'
+          new_constants = 'LLAMA_TAG = "b4400"\nLLAMA_COMMIT = "6e1531aca5ed17f078973b4700fcdadbda4a34a5"\nLLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"'
           if text.count(old_constants) != 1:
               raise SystemExit('expected llama pin block not found exactly once')
           text = text.replace(old_constants, new_constants)
 
-          old_build = '''def build_runtime() -> None:
-              RUNTIME.mkdir(parents=True, exist_ok=True)
-              cli = RUNTIME / "llama-cli"
-              if cli.exists():
-                  p = sh([str(cli), "--version"], check=False, capture=True)
-                  if p.returncode == 0:
-                      print("llama-cli already installed and runnable.")
-                      return
-                  cli.unlink()
-              src = VENDOR / "llama.cpp"
-              VENDOR.mkdir(parents=True, exist_ok=True)
-              if src.exists() and not (src / "Makefile").exists():
-                  print("Removing incomplete llama.cpp bootstrap directory...")
-                  shutil.rmtree(src, ignore_errors=True)
-              if not src.exists():
-                  print(f"Cloning llama.cpp {LLAMA_TAG} before network isolation...")
-                  sh(["/usr/bin/git", "clone", "--depth", "1", "--branch", LLAMA_TAG, LLAMA_REPO, str(src)])
-              print("Building CPU-only llama.cpp for this Intel Mac (2 jobs, Metal disabled)...")
-              env = os.environ.copy()
-              env.update({"LLAMA_MAKEFILE": "1", "GGML_NO_METAL": "1", "GGML_NO_OPENMP": "1"})
-              p = subprocess.run(["/usr/bin/make", "-j2", "llama-cli"], cwd=str(src), env=env)
-              if p.returncode != 0:
-                  raise SystemExit("llama.cpp build failed. Xcode Command Line Tools may be missing or incompatible.")
-              built = src / "llama-cli"
-              if not built.exists():
-                  raise SystemExit("llama.cpp build completed but llama-cli was not found.")
-              shutil.copy2(built, cli)
-              os.chmod(cli, 0o755)
-              p = sh([str(cli), "--version"], check=False, capture=True)
-              if p.returncode != 0:
-                  raise SystemExit("Built llama-cli does not run on this macOS version.")
-          '''.replace('          ', '')
+          start_marker = 'def build_runtime() -> None:\n'
+          end_marker = '\n\ndef install_model() -> None:\n'
+          start = text.find(start_marker)
+          end = text.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('could not locate build_runtime function boundaries')
 
           new_build = '''def llama_checkout_matches(src: Path) -> bool:
               """Return True only for the exact llama.cpp revision Mac Brain supports."""
@@ -115,22 +89,24 @@ jobs:
               p = sh([str(cli), "--version"], check=False, capture=True)
               if p.returncode != 0:
                   raise SystemExit("Built llama-cli does not run on this macOS version.")
-          '''.replace('          ', '')
-
-          if text.count(old_build) != 1:
-              raise SystemExit('expected build_runtime block not found exactly once')
-          text = text.replace(old_build, new_build)
+          '''
+          # The workflow YAML indents this heredoc's Python, but the string itself is
+          # authored with 10 extra spaces so strip exactly that prefix from each line.
+          new_build = '\n'.join(line[10:] if line.startswith('          ') else line for line in new_build.splitlines())
+          text = text[:start] + new_build + text[end:]
 
           old_smoke = '''    # Same argv builder as the runtime so the smoke test exercises the real invocation
-              # (including -no-cnv; otherwise llama-cli waits for keyboard input here).'''.replace('              ', '')
+              # (including -no-cnv; otherwise llama-cli waits for keyboard input here).'''
+          old_smoke = '\n'.join(line[10:] if line.startswith('          ') else line for line in old_smoke.splitlines())
           new_smoke = '''    # Same argv builder as the runtime so the smoke test exercises the real invocation.
-              # stdin is disconnected below so the local model can never wait on keyboard input.'''.replace('              ', '')
+              # stdin is disconnected below so the local model can never wait on keyboard input.'''
+          new_smoke = '\n'.join(line[10:] if line.startswith('          ') else line for line in new_smoke.splitlines())
           if text.count(old_smoke) != 1:
               raise SystemExit('expected smoke-test comment not found exactly once')
           text = text.replace(old_smoke, new_smoke)
           path.write_text(text)
 
-          Path('tests/test_installer_runtime.py').write_text('''import tempfile\nimport unittest\nfrom pathlib import Path\nfrom unittest import mock\n\nimport install as installer\n\n\nclass FakeResult:\n    def __init__(self, returncode=0, stdout=\"\", stderr=\"\"):\n        self.returncode = returncode\n        self.stdout = stdout\n        self.stderr = stderr\n\n\nclass LlamaRuntimePinTests(unittest.TestCase):\n    def test_pin_is_pre_refactor_qwen2_build(self):\n        self.assertEqual(installer.LLAMA_TAG, \"b4400\")\n        self.assertEqual(installer.LLAMA_COMMIT, \"6e1531aca5ed17f078973b4700fcdadbda4a34a5\")\n\n    def test_checkout_match_requires_exact_commit(self):\n        with tempfile.TemporaryDirectory() as td:\n            src = Path(td)\n            (src / \"Makefile\").write_text(\"legacy makefile\")\n            with mock.patch.object(installer, \"sh\", return_value=FakeResult(0, installer.LLAMA_COMMIT + \"\\n\")):\n                self.assertTrue(installer.llama_checkout_matches(src))\n            with mock.patch.object(installer, \"sh\", return_value=FakeResult(0, \"c64d2becb13f2a7c0145b516a05f028d949a046b\\n\")):\n                self.assertFalse(installer.llama_checkout_matches(src))\n\n    def test_missing_makefile_never_matches(self):\n        with tempfile.TemporaryDirectory() as td:\n            with mock.patch.object(installer, \"sh\") as sh:\n                self.assertFalse(installer.llama_checkout_matches(Path(td)))\n                sh.assert_not_called()\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n''')
+          Path('tests/test_installer_runtime.py').write_text('''import sys\nimport tempfile\nimport unittest\nfrom pathlib import Path\nfrom unittest import mock\n\nsys.path.insert(0, str(Path(__file__).resolve().parents[1]))\nimport install as installer\n\n\nclass FakeResult:\n    def __init__(self, returncode=0, stdout=\"\", stderr=\"\"):\n        self.returncode = returncode\n        self.stdout = stdout\n        self.stderr = stderr\n\n\nclass LlamaRuntimePinTests(unittest.TestCase):\n    def test_pin_is_pre_refactor_qwen2_build(self):\n        self.assertEqual(installer.LLAMA_TAG, \"b4400\")\n        self.assertEqual(installer.LLAMA_COMMIT, \"6e1531aca5ed17f078973b4700fcdadbda4a34a5\")\n\n    def test_checkout_match_requires_exact_commit(self):\n        with tempfile.TemporaryDirectory() as td:\n            src = Path(td)\n            (src / \"Makefile\").write_text(\"legacy makefile\")\n            with mock.patch.object(installer, \"sh\", return_value=FakeResult(0, installer.LLAMA_COMMIT + \"\\n\")):\n                self.assertTrue(installer.llama_checkout_matches(src))\n            with mock.patch.object(installer, \"sh\", return_value=FakeResult(0, \"c64d2becb13f2a7c0145b516a05f028d949a046b\\n\")):\n                self.assertFalse(installer.llama_checkout_matches(src))\n\n    def test_missing_makefile_never_matches(self):\n        with tempfile.TemporaryDirectory() as td:\n            with mock.patch.object(installer, \"sh\") as sh:\n                self.assertFalse(installer.llama_checkout_matches(Path(td)))\n                sh.assert_not_called()\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n''')
           PY
 
       - name: Run focused regression tests
@@ -144,6 +120,6 @@ jobs:
           rm .github/workflows/one-shot-fix-big-sur-llama.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add install.py tests/test_installer_runtime.py macbrain/llm.py tests/test_review_fixes.py .github/workflows/one-shot-fix-big-sur-llama.yml
+          git add -A
           git commit -m "Fix Big Sur llama.cpp linker bootstrap"
           git push origin HEAD:fix/big-sur-llama-linker
