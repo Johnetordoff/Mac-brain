@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 import time
 
@@ -125,15 +124,13 @@ def main(argv=None) -> int:
         from pathlib import Path
         from .config import load_config
         cfg = load_config()
-        launch_plist = Path.home() / "Library/LaunchAgents/com.macbrain.performancehunter.plist"
-        launch_running = subprocess.run(
-            ["/bin/launchctl", "list", "com.macbrain.performancehunter"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
-        ).returncode == 0
+        from .lifecycle import CONTAINMENT_MARKER, LAUNCH_AGENT, launch_agent_running
+        launch_plist = LAUNCH_AGENT
+        launch_running = launch_agent_running()
         recent = db.recent_samples(1)
         fresh_sample = bool(recent and time.time() - float(recent[0].get("ts", 0)) < 300)
         active = mission_active()
-        containment_marker = Path("/Library/Application Support/MacBrain/containment-active")
+        containment_marker = CONTAINMENT_MARKER
         # Before containment the installer intentionally starts the worker for a short
         # proof-of-life check. After containment, OFF means the worker must be unloaded.
         expect_running = bool(args.expect_running or active or not containment_marker.exists())
@@ -200,24 +197,32 @@ def main(argv=None) -> int:
         print(agent_ask(args.question))
     elif args.cmd == "proposals":
         print_proposals()
-    elif args.cmd == "proposal":
-        pid = int(str(args.id).upper().lstrip("P"))
+    elif args.cmd in ("proposal", "approve"):
+        try:
+            pid = int(str(args.id).upper().lstrip("P"))
+        except ValueError:
+            print(f"Not a proposal id: {args.id} (expected something like P0007)", file=sys.stderr)
+            return 2
+    if args.cmd == "proposal":
         row = db.get_proposal(pid)
         if not row:
             print("Proposal not found", file=sys.stderr)
             return 2
         print(json.dumps(row, indent=2, sort_keys=True))
     elif args.cmd == "approve":
-        pid = int(str(args.id).upper().lstrip("P"))
-        if args.quarantine:
-            dest = quarantine(pid)
-            print(f"Quarantined to {dest}")
-        else:
-            if not args.confirm_delete:
-                print("Permanent deletion requires --confirm-delete", file=sys.stderr)
-                return 2
-            permanent_delete(pid)
-            print(f"P{pid:04d} permanently deleted by explicit user command.")
+        try:
+            if args.quarantine:
+                dest = quarantine(pid)
+                print(f"Quarantined to {dest}")
+            else:
+                if not args.confirm_delete:
+                    print("Permanent deletion requires --confirm-delete", file=sys.stderr)
+                    return 2
+                permanent_delete(pid)
+                print(f"P{pid:04d} permanently deleted by explicit user command.")
+        except (PermissionError, FileNotFoundError, ValueError) as exc:
+            print(f"P{pid:04d} not changed: {exc}", file=sys.stderr)
+            return 2
     return 0
 
 

@@ -100,7 +100,13 @@ def tool_list_dir(args: Dict[str, Any]) -> List[Dict[str, Any]]:
 def tool_read_text(args: Dict[str, Any]) -> Dict[str, Any]:
     p = _safe_path(str(args.get("path", "")))
     max_bytes = min(max(int(args.get("max_bytes", 16384)), 1), 65536)
-    data = p.read_bytes()[:max_bytes]
+    # Only regular files, and read at most max_bytes: read_bytes() on a multi-GB disk
+    # image would pull it all into RAM on this 6 GB Mac, and a FIFO would block forever
+    # and wedge the background AI cycle.
+    if not p.is_file():
+        raise ValueError(f"not a regular file: {p}")
+    with p.open("rb") as fh:
+        data = fh.read(max_bytes)
     return {"path": str(p), "text": data.decode("utf-8", errors="replace"), "bytes_read": len(data)}
 
 

@@ -390,9 +390,31 @@ def write_launch_agent(info: dict) -> Path:
     return dest
 
 
-def load_launch_agent(dest: Path) -> None:
-    sh(["/bin/launchctl", "load", str(dest)], check=True)
-    print("Performance Hunter LaunchAgent installed and running.")
+def proof_of_life(timeout: float = 120.0) -> None:
+    """Start the background worker and wait for it to record a NEW evidence sample.
+
+    The plist intentionally has no RunAtLoad, so `launchctl load` alone never runs it;
+    launch_worker() loads and explicitly starts it. Waiting for a fresh sample written
+    by the worker (not the earlier first-mission pass) proves the worker really runs.
+    """
+    from macbrain import db
+    from macbrain.lifecycle import CONTAINMENT_MARKER, launch_worker
+
+    if CONTAINMENT_MARKER.exists():
+        # Re-install on an already-armed Mac: the worker deliberately exits unless the
+        # user has run `macbrain start` this boot, so it cannot be probed here.
+        print("Containment is already armed; the worker will be verified by `macbrain start`.")
+        return
+    started = time.time()
+    if not launch_worker():
+        raise SystemExit("Background worker did not start. Network isolation was NOT applied.")
+    while time.time() - started < timeout:
+        recent = db.recent_samples(1)
+        if recent and float(recent[0].get("ts", 0)) >= started:
+            print("Performance Hunter background worker is running and recording evidence.")
+            return
+        time.sleep(2)
+    raise SystemExit("Background worker started but recorded no evidence. Network isolation was NOT applied.")
 
 
 def _ssh_listening() -> bool:
@@ -463,10 +485,17 @@ def runtime_smoke_test(info: dict) -> None:
     print("Smoke-testing the local Qwen model before network isolation...")
     cli = RUNTIME / "llama-cli"
     prompt = "<|im_start|>system\nAnswer with exactly: MAC BRAIN AWAKE<|im_end|>\n<|im_start|>user\nWake up.<|im_end|>\n<|im_start|>assistant\n"
-    cmd = [str(cli), "-m", str(MODEL), "-t", "2", "-c", "512", "-n", "12", "-ngl", "0", "--temp", "0", "--no-display-prompt", "-p", prompt]
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=420, check=False)
+    # Same argv builder as the runtime so the smoke test exercises the real invocation
+    # (including -no-cnv; otherwise llama-cli waits for keyboard input here).
+    from macbrain.llm import llama_cli_args
+    cmd = llama_cli_args(cli, MODEL, prompt, threads=2, context=512, predict=12, temp="0")
+    try:
+        p = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=420, check=False)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("Local-model smoke test timed out. Network isolation was NOT applied.")
     output = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
-    if p.returncode != 0 or "MAC BRAIN" not in output.upper():
+    # Check stdout only: llama.cpp logs on stderr can echo prompt text and fake a pass.
+    if p.returncode != 0 or "MAC BRAIN" not in (p.stdout or "").upper():
         print(output[-4000:])
         raise SystemExit("Local-model smoke test failed. Network isolation was NOT applied.")
     print("Local Qwen inference smoke test passed.")
@@ -523,15 +552,14 @@ def main() -> int:
         install_command_wrapper(info)
         ensure_ssh()
         enable_wake_for_network()
-        launch_agent = write_launch_agent(info)
+        write_launch_agent(info)
 
         runtime_smoke_test(info)
         print("\nRunning Mac Brain's first mission baseline (non-destructive)...")
         sh([info["python"], "-m", "macbrain", "first-mission", "--no-llm"], cwd=ROOT)
 
         print("\nProof-of-life test: starting the background hunter before isolation...")
-        load_launch_agent(launch_agent)
-        time.sleep(3)
+        proof_of_life()
         doctor = sh([info["python"], "-m", "macbrain", "doctor"], check=False, capture=True, cwd=ROOT)
         print((doctor.stdout or "").strip())
         if doctor.returncode != 0:
@@ -556,24 +584,21 @@ def main() -> int:
             ssh_source, info["interface"], info.get("gateway", ""), info.get("network_service", ""),
             info.get("local_ip", ""), info.get("netmask", ""),
         )
-        try:
-            load_launch_agent(launch_agent)
-        except Exception:
-            print("Background agent failed after isolation; restoring pre-Mac-Brain networking.")
-            sh(["sudo", "-n", "/bin/bash", str(ROOT / "scripts" / "network_unlock.sh")], check=False)
-            raise
-        from macbrain.config import set_mission_active
-        set_mission_active(True)
+        # Containment is armed, but Mac Brain stays OFF until the user explicitly
+        # starts it (see LIFECYCLE.md). set_mission_active(True) without user
+        # authorization is refused by design, so never claim the mission is active here.
+        unload_agent()
         armed = True
         # Do not keep an administrator sudo timestamp alive for the interactive console.
         keepalive.set()
 
-        print("\nMAC BRAIN IS AWAKE.")
-        print("Network containment is active and verified. Your takeover approval is now in force, so the autonomous SPEED UP MAC BRAIN mission is active.")
-        print("Opening the Mac Brain console now. You can leave it later; the background mission will keep running.")
+        print("\nNetwork containment is active and verified. Mac Brain is installed and OFF.")
+        print("To start the SPEED UP MAC BRAIN mission now, type the start code word below.")
+        print("(Anything else leaves it OFF; you can start it later with: macbrain start)")
+        subprocess.run([info["python"], "-m", "macbrain", "start"], cwd=str(ROOT))
         console = subprocess.run([info["python"], "-m", "macbrain", "console"], cwd=str(ROOT))
         if console.returncode != 0:
-            print("Mac Brain console exited with an error, but the installed local monitor remains available as: macbrain console")
+            print("Mac Brain console exited with an error. Reconnect later with: macbrain console")
             return console.returncode
         return 0
     finally:

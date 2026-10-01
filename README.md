@@ -70,7 +70,7 @@ Only when you are satisfied do you explicitly type:
 TAKE OVER MAC BRAIN
 ```
 
-That returns to the installer. It still does **not** start the autonomous mission until network containment succeeds.
+That returns to the installer. It still does **not** start the autonomous mission; see [LIFECYCLE.md](LIFECYCLE.md).
 
 ### Stage 2 — contained autonomous appliance
 
@@ -82,7 +82,7 @@ It then asks:
 Type ARM MAC BRAIN to apply containment and start the autonomous mission:
 ```
 
-Only after that exact confirmation does the installer apply and verify the low-level network boundary. After containment succeeds, `SPEED UP MAC BRAIN` becomes a persistent background mission automatically.
+Only after that exact confirmation does the installer apply and verify the low-level network boundary. Containment does **not** start the AI: Mac Brain stays OFF until you type `START MAC BRAIN` (the installer offers this prompt once, right after arming).
 
 ## What “one-way” networking means technically
 
@@ -104,20 +104,19 @@ This is intentionally defense-in-depth. PF is an advanced macOS packet-filter me
 
 ## What happens after takeover
 
-After containment verifies successfully, the background LaunchAgent starts and the mission is marked active. The installer opens the normal console:
+After containment verifies successfully, Mac Brain is installed and **OFF**. The installer asks once for the start code word; typing `START MAC BRAIN` launches the background worker for the current boot. Anything else leaves it off, and you can start it later with:
 
-```text
-Hey John. I'm Mac Brain, your local AI unit. My mission is already active: speed up this computer.
-I'll keep working in the background after this terminal closes.
+```bash
+macbrain start
 ```
 
-Closing that terminal or ending SSH does **not** stop the background mission. Later:
+Once started, closing the terminal or ending SSH does **not** stop the background mission. `macbrain stop` (or `STOP MAC BRAIN` in the console) stops it, and a reboot always leaves it OFF. Later:
 
 ```bash
 macbrain console
 ```
 
-reconnects to the same running agent.
+reconnects to the running agent.
 
 While the console is open, reports appear roughly every two minutes. The two-minute report cadence does **not** force model inference every two minutes; doing that on this dual-core Mac would make Mac Brain itself a performance problem.
 
@@ -126,8 +125,10 @@ Default cadence:
 - cheap performance sample: every 60 seconds;
 - short progress report: about every 120 seconds;
 - rotating deeper filesystem pass: every 30 minutes while idle and on AC;
-- local Qwen reasoning cycle: every 15 minutes while idle and on AC, starting on the first eligible cycle after takeover;
+- local Qwen reasoning cycle: every 15 minutes while idle and on AC, starting on the first eligible cycle after `macbrain start`;
 - interactive local reasoning whenever you ask Mac Brain a question.
+
+Only one Qwen process runs at a time: a console question waits for an in-progress background cycle (and vice versa) rather than running two 1.1 GB models side by side. Per-minute samples are kept for 14 days and console reports for 30 days so the evidence database stays bounded.
 
 The worn battery is part of the evidence. Cheap monitoring continues on battery, but expensive scans and Qwen inference pause unless the Mac is on AC power.
 

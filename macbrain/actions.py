@@ -41,19 +41,38 @@ DYNAMIC_BLOCKED_PREFIXES = [
 ]
 
 
+def _is_within(path: str, prefix: str) -> bool:
+    return path == prefix or path.startswith(prefix.rstrip("/") + "/")
+
+
 def _validate_target(target: str) -> Path:
-    p = Path(target).expanduser().resolve()
-    s = str(p)
-    for prefix in BLOCKED_PREFIXES:
-        if s == prefix or s.startswith(prefix + "/"):
-            raise PermissionError(f"Mac Brain refuses to mutate protected target {s}")
-    for prefix_path in DYNAMIC_BLOCKED_PREFIXES:
-        prefix = str(prefix_path)
-        if s == prefix or s.startswith(prefix + "/"):
-            raise PermissionError(f"Mac Brain refuses to mutate its own state/control path {s}")
-    if s in ("/", str(Path.home())):
+    """Return the filesystem entry to mutate, refusing protected locations.
+
+    The returned path resolves parent directories but NOT the final component, so a
+    symlink target means the link itself. Resolving it fully would make quarantine or
+    --delete act on whatever the link points to (e.g. a real Documents folder).
+    Both the entry and its fully resolved destination must pass the blocklist.
+    """
+    raw = Path(target).expanduser()
+    if not raw.is_absolute():
+        raise PermissionError(f"refusing relative cleanup target {target!r}")
+    lexical = Path(os.path.normpath(str(raw)))
+    if lexical == Path("/"):
         raise PermissionError("refusing broad destructive target")
-    return p
+    entry = lexical.parent.resolve() / lexical.name
+    candidates = {str(entry), str(lexical.resolve())}
+    protected = [str(p) for p in DYNAMIC_BLOCKED_PREFIXES] + [str(Path.home().resolve())]
+    for s in candidates:
+        for prefix in BLOCKED_PREFIXES:
+            if _is_within(s, prefix):
+                raise PermissionError(f"Mac Brain refuses to mutate protected target {s}")
+        for prefix in DYNAMIC_BLOCKED_PREFIXES:
+            if _is_within(s, str(prefix)):
+                raise PermissionError(f"Mac Brain refuses to mutate its own state/control path {s}")
+        # Removing an ancestor (e.g. /Users) would remove the home folder or Mac Brain itself.
+        if s == "/" or any(_is_within(p, s) for p in protected):
+            raise PermissionError(f"refusing broad destructive target {s}")
+    return entry
 
 
 def _actionable_proposal(proposal_id: int) -> Dict[str, object]:
@@ -72,7 +91,7 @@ def quarantine(proposal_id: int) -> Path:
     if not target:
         raise ValueError("proposal has no filesystem target")
     p = _validate_target(target)
-    if not p.exists():
+    if not (p.exists() or p.is_symlink()):
         raise FileNotFoundError(str(p))
     stamp = time.strftime("%Y%m%d-%H%M%S")
     dest = QUARANTINE_DIR / f"P{proposal_id:04d}-{stamp}-{p.name}"
@@ -87,9 +106,11 @@ def permanent_delete(proposal_id: int) -> None:
     if not target:
         raise ValueError("proposal has no filesystem target")
     p = _validate_target(target)
-    if p.is_dir() and not p.is_symlink():
+    if p.is_symlink():
+        p.unlink()
+    elif p.is_dir():
         shutil.rmtree(str(p))
-    elif p.exists() or p.is_symlink():
+    elif p.exists():
         p.unlink()
     else:
         raise FileNotFoundError(str(p))

@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .config import load_config
+from .config import APP_DIR, ensure_dirs, load_config
+
+LLM_LOCK_PATH = APP_DIR / "llm.lock"
+END_OF_TEXT = "[end of text]"
 
 SYSTEM_PROMPT = r"""You are Mac Brain, a small local maintenance agent living entirely on one old Intel Mac.
 Your permanent first mission is SPEED UP MAC BRAIN.
@@ -55,6 +60,47 @@ def _format_prompt(messages: List[Dict[str, str]]) -> str:
     return "".join(chunks)
 
 
+@contextmanager
+def _inference_lock():
+    """Allow only one llama-cli at a time across the console and the background worker.
+
+    Two concurrent 1.1 GB Qwen processes on this dual-core Mac would each run at half
+    speed and push the machine into swap, which is exactly what Mac Brain is meant to fix.
+    """
+    ensure_dirs()
+    with open(LLM_LOCK_PATH, "a") as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+def llama_cli_args(cli: Path, model: Path, prompt: str, *, threads: int, context: int, predict: int, temp: str) -> List[str]:
+    # -no-cnv is required: the pinned llama.cpp build auto-enables interactive
+    # conversation mode whenever the GGUF has a chat template (Qwen does). Without it,
+    # llama-cli re-wraps our ChatML prompt as a system message and then waits for
+    # keyboard input, hanging the console and the background worker.
+    return [
+        str(cli), "-m", str(model),
+        "-t", str(threads),
+        "-c", str(context),
+        "-n", str(predict),
+        "-ngl", "0",
+        "--temp", temp,
+        "-no-cnv",
+        "--no-display-prompt",
+        "-p", prompt,
+    ]
+
+
+def clean_output(text: str) -> str:
+    text = (text or "").strip()
+    if text.endswith(END_OF_TEXT):
+        text = text[: -len(END_OF_TEXT)].rstrip()
+    return text
+
+
 def generate(messages: List[Dict[str, str]]) -> str:
     cfg = load_config()
     cli = Path(str(cfg["llama_cli"]))
@@ -68,20 +114,25 @@ def generate(messages: List[Dict[str, str]]) -> str:
     for key in list(env):
         if "proxy" in key.lower():
             env.pop(key, None)
-    cmd = [
-        str(cli), "-m", str(model),
-        "-t", str(int(cfg.get("llm_threads", 2))),
-        "-c", str(int(cfg.get("llm_context", 2048))),
-        "-n", str(int(cfg.get("llm_predict", 420))),
-        "-ngl", "0",
-        "--temp", "0.15",
-        "--no-display-prompt",
-        "-p", prompt,
-    ]
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env, check=False)
+    cmd = llama_cli_args(
+        cli, model, prompt,
+        threads=int(cfg.get("llm_threads", 2)),
+        context=int(cfg.get("llm_context", 2048)),
+        predict=int(cfg.get("llm_predict", 320)),
+        temp="0.15",
+    )
+    with _inference_lock():
+        try:
+            p = subprocess.run(
+                cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                timeout=600, env=env, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("local model did not finish within 10 minutes")
     if p.returncode != 0:
-        raise RuntimeError((p.stderr or p.stdout or "llama-cli failed").strip())
-    return (p.stdout or "").strip()
+        detail = (p.stderr or p.stdout or "llama-cli failed").strip()
+        raise RuntimeError(detail[-2000:])
+    return clean_output(p.stdout)
 
 
 def maybe_tool_call(text: str) -> Optional[Dict[str, Any]]:

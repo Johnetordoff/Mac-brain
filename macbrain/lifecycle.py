@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Dict, List
 
@@ -15,12 +16,49 @@ CONTAINMENT_MARKER = Path("/Library/Application Support/MacBrain/containment-act
 
 
 def launch_agent_running() -> bool:
-    return subprocess.run(
-        ["/bin/launchctl", "list", LABEL],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    ).returncode == 0
+    """True only if the worker process is actually running, not merely loaded.
+
+    The plist has no RunAtLoad, and launchd auto-loads ~/Library/LaunchAgents at every
+    login, so `launchctl list LABEL` succeeding only proves the job is loaded. A running
+    job reports a "PID" key.
+    """
+    try:
+        p = subprocess.run(
+            ["/bin/launchctl", "list", LABEL],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return False
+    return p.returncode == 0 and '"PID" =' in (p.stdout or "")
+
+
+def _launchctl(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["/bin/launchctl", *args], capture_output=True, text=True, check=False)
+
+
+def launch_worker(wait_seconds: float = 15.0) -> bool:
+    """Load the LaunchAgent and explicitly start it; return whether it is running.
+
+    `launchctl load` alone never runs a job without RunAtLoad/KeepAlive, so the worker
+    must be started by label. Unloading first makes this work after a reboot/login,
+    when launchd has already auto-loaded (but not started) the plist.
+    """
+    _launchctl("unload", str(LAUNCH_AGENT))
+    result = _launchctl("load", str(LAUNCH_AGENT))
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or "launchctl load failed").strip())
+    result = _launchctl("start", LABEL)
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or "launchctl start failed").strip())
+    deadline = time.time() + wait_seconds
+    while True:
+        if launch_agent_running():
+            return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(0.5)
 
 
 def _terminate_local_llama_processes() -> List[int]:
@@ -86,24 +124,28 @@ def start_mac_brain(require_tty: bool = True) -> Dict[str, object]:
         raise RuntimeError("Mac Brain cannot start because verified network containment is not armed.")
     if not LAUNCH_AGENT.exists():
         raise RuntimeError(f"LaunchAgent is not installed: {LAUNCH_AGENT}")
-    phrase = input("Type START MAC BRAIN to start the local AI mission: ").strip()
+    try:
+        phrase = input("Type START MAC BRAIN to start the local AI mission: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        raise RuntimeError("Start cancelled. Mac Brain remains off.")
     if phrase != "START MAC BRAIN":
         raise RuntimeError("Start cancelled. Mac Brain remains off.")
 
     # The worker itself is fail-closed after containment: it exits immediately unless
     # the current-boot active marker already exists. Write that marker only after the
-    # interactive TTY/code-word checks above, then roll it back if launchctl fails.
+    # interactive TTY/code-word checks above, then roll it back if the worker does not start.
     set_mission_active(False)
     if not set_mission_active(True, user_authorized=True):
         raise RuntimeError("Mac Brain activation was not authorized.")
-    result = subprocess.run(
-        ["/bin/launchctl", "load", str(LAUNCH_AGENT)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
+    try:
+        running = launch_worker()
+    except (RuntimeError, OSError):
         set_mission_active(False)
-        detail = (result.stderr or result.stdout or "launchctl load failed").strip()
-        raise RuntimeError(detail)
-    return {"running": launch_agent_running()}
+        raise
+    if not running:
+        stop_mac_brain()
+        raise RuntimeError(
+            "The background worker did not start. Mac Brain remains off; "
+            "see ~/.macbrain/monitor.err.log."
+        )
+    return {"running": True}

@@ -182,3 +182,16 @@ def reports_since(after_id: int, limit: int = 100) -> List[Dict[str, Any]]:
             (after_id, limit),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def prune(sample_days: float = 14, report_days: float = 30) -> None:
+    """Drop old per-minute samples and console reports so the DB stays bounded.
+
+    One ~4 KB sample per minute is ~2 GB/year, which would itself become a storage
+    problem on the Mac this project is trying to speed up. Observations and proposals
+    are kept: they are the durable findings.
+    """
+    now = time.time()
+    with connection() as conn:
+        conn.execute("DELETE FROM samples WHERE ts < ?", (now - sample_days * 86400,))
+        conn.execute("DELETE FROM reports WHERE ts < ?", (now - report_days * 86400,))

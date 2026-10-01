@@ -197,6 +197,8 @@ def daemon() -> None:
     deep_every = max(300, int(cfg.get("deep_scan_minutes", 30)) * 60)
     synth_every = max(300, int(cfg.get("llm_synthesis_minutes", 15)) * 60)
     battery_every = 6 * 3600
+    prune_every = 3600
+    last_prune = 0.0
     started = time.time()
     last_deep = started
     last_synthesis = 0.0
@@ -224,6 +226,10 @@ def daemon() -> None:
             per_cpu = snapshot["load"]["1m"] / max(snapshot["load"]["cpus"], 1)
             idle = per_cpu <= float(cfg.get("idle_load_per_cpu_max", 0.55))
             ac = on_ac_power(snapshot)
+
+            if now - last_prune >= prune_every:
+                db.prune()
+                last_prune = now
 
             if now - last_battery >= battery_every:
                 inspect_battery_health()
