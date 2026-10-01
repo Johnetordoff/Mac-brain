@@ -47,8 +47,12 @@ class GitStoreTests(unittest.TestCase):
         self.assertTrue(hook.exists())
         self.assertTrue(os.access(str(hook), os.X_OK))
         text = hook.read_text()
+        self.assertTrue(text.startswith("#!"))
+        self.assertIn("python", text.splitlines()[0].lower())
         self.assertIn("low disk space", text)
-        self.assertIn("MIN_RESERVE_KB=1048576", text)
+        self.assertIn("shutil.disk_usage", text)
+        self.assertNotIn("#!/bin/sh", text)
+        self.assertNotIn("#!/bin/bash", text)
 
     def test_push_in_from_local_source_and_explicit_info(self):
         target = gitstore.create_repo("brain-one")
