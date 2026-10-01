@@ -1,0 +1,71 @@
+name: Apply Big Sur llama hotfix
+
+on:
+  push:
+    branches:
+      - fix/big-sur-llama-linker-current
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/big-sur-llama-linker-current
+      - name: Patch current Mac Brain installer
+        shell: python
+        run: |
+          from pathlib import Path
+
+          install = Path("install.py")
+          text = install.read_text(encoding="utf-8")
+
+          old_constants = 'LLAMA_TAG = "b4528"\nLLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"\n'
+          new_constants = 'LLAMA_TAG = "b4400"\nLLAMA_COMMIT = "6e1531aca5ed17f078973b4700fcdadbda4a34a5"\nLLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"\n'
+          assert old_constants in text, "expected b4528 constants not found"
+          text = text.replace(old_constants, new_constants, 1)
+
+          marker = '\ndef build_runtime() -> None:\n'
+          helper = '''\ndef llama_checkout_matches(src: Path) -> bool:\n    \"\"\"Return True only for the exact llama.cpp revision Mac Brain supports.\"\"\"\n    if not (src / \"Makefile\").exists():\n        return False\n    head = sh(\n        [\"/usr/bin/git\", \"-C\", str(src), \"rev-parse\", \"HEAD\"],\n        check=False, capture=True,\n    )\n    return head.returncode == 0 and (head.stdout or \"\").strip() == LLAMA_COMMIT\n\n\n'''
+          assert marker in text, "build_runtime marker not found"
+          text = text.replace(marker, helper + 'def build_runtime() -> None:\n', 1)
+
+          old_stale = '''    if src.exists() and not (src / \"Makefile\").exists():\n        shutil.rmtree(src, ignore_errors=True)\n'''
+          new_stale = '''    if src.exists() and not llama_checkout_matches(src):\n        print(f\"Replacing stale/incomplete llama.cpp checkout with pinned {LLAMA_TAG}...\")\n        shutil.rmtree(src, ignore_errors=True)\n'''
+          assert old_stale in text, "stale checkout block not found"
+          text = text.replace(old_stale, new_stale, 1)
+
+          old_clone = '''    if not src.exists():\n        print(f\"Cloning pinned local inference runtime {LLAMA_TAG} before containment...\")\n        sh([\"/usr/bin/git\", \"clone\", \"--depth\", \"1\", \"--branch\", LLAMA_TAG, LLAMA_REPO, str(src)])\n'''
+          new_clone = old_clone + '''    if not llama_checkout_matches(src):\n        raise SystemExit(\n            f\"llama.cpp checkout is not the expected pinned revision {LLAMA_COMMIT}. \"\n            \"Networking is still normal; rerun python3.14 install.py to retry.\"\n        )\n'''
+          assert old_clone in text, "clone block not found"
+          text = text.replace(old_clone, new_clone, 1)
+
+          old_error = '        raise SystemExit("Pinned local inference runtime build failed.")\n'
+          new_error = '''        raise SystemExit(\n            f\"llama.cpp {LLAMA_TAG} build failed. Networking is still normal; \"\n            \"review the compiler/linker output above.\"\n        )\n'''
+          assert old_error in text, "build failure message not found"
+          text = text.replace(old_error, new_error, 1)
+          install.write_text(text, encoding="utf-8")
+
+          llm = Path("macbrain/llm.py")
+          llm_text = llm.read_text(encoding="utf-8")
+          old_flag = '        "-no-cnv",\n'
+          assert old_flag in llm_text, "expected -no-cnv flag not found"
+          llm_text = llm_text.replace(old_flag, "", 1)
+          llm.write_text(llm_text, encoding="utf-8")
+
+          test = Path("tests/test_llama_runtime_compat.py")
+          test.write_text('''import tempfile\nimport unittest\nfrom pathlib import Path\nfrom unittest import mock\n\nimport install as installer\nfrom macbrain import llm\n\n\nclass FakeResult:\n    def __init__(self, returncode=0, stdout=\"\", stderr=\"\"):\n        self.returncode = returncode\n        self.stdout = stdout\n        self.stderr = stderr\n\n\nclass LlamaRuntimeCompatibilityTests(unittest.TestCase):\n    def test_pin_is_pre_refactor_qwen2_build(self):\n        self.assertEqual(installer.LLAMA_TAG, \"b4400\")\n        self.assertEqual(installer.LLAMA_COMMIT, \"6e1531aca5ed17f078973b4700fcdadbda4a34a5\")\n\n    def test_checkout_match_requires_exact_commit(self):\n        with tempfile.TemporaryDirectory() as td:\n            src = Path(td)\n            (src / \"Makefile\").write_text(\"legacy makefile\")\n            with mock.patch.object(installer, \"sh\", return_value=FakeResult(0, installer.LLAMA_COMMIT + \"\\n\")):\n                self.assertTrue(installer.llama_checkout_matches(src))\n            with mock.patch.object(installer, \"sh\", return_value=FakeResult(0, \"wrong\\n\")):\n                self.assertFalse(installer.llama_checkout_matches(src))\n\n    def test_old_runtime_does_not_receive_newer_no_cnv_flag(self):\n        args = llm.llama_cli_args(\n            Path(\"/x/llama-cli\"), Path(\"/x/model.gguf\"), \"hi\",\n            threads=2, context=512, predict=12, temp=\"0\",\n        )\n        self.assertNotIn(\"-cnv\", args)\n        self.assertNotIn(\"--conversation\", args)\n        self.assertNotIn(\"-no-cnv\", args)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n''', encoding="utf-8")
+
+          Path(".github/workflows/apply-big-sur-llama-hotfix.yml").unlink()
+      - name: Compile patched Python
+        run: python -m py_compile install.py macbrain/llm.py tests/test_llama_runtime_compat.py
+      - name: Commit hotfix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix Big Sur llama.cpp linker bootstrap"
+          git push origin HEAD:fix/big-sur-llama-linker-current
