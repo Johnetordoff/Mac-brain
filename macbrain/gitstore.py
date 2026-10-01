@@ -137,7 +137,12 @@ def create_repo(name: str) -> Path:
         raise FileExistsError(str(path))
     path.parent.mkdir(parents=True, exist_ok=True)
     _require_ok(_run_git(["init", "--bare", str(path)]), f"create {name}")
-    _install_storage_guard(path)
+    try:
+        _install_storage_guard(path)
+    except Exception:
+        # A half-configured receiving repository is less safe than no repository.
+        shutil.rmtree(str(path), ignore_errors=True)
+        raise
     return path
 
 
