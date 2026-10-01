@@ -1,1 +1,0 @@
-Regression source: 2014 Intel MacBook Pro, macOS 11.7.10, llama.cpp b4528 legacy Makefile linker failure (undefined x86_64 symbols).
