@@ -13,8 +13,23 @@ jobs:
         with:
           python-version: "3.14"
       - name: Enforce Python-only repository policy
-        run: python3 tools/repo_policy.py
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path("tools/repo_policy.py", run_name="__main__")
       - name: Run unit tests
-        run: python3 -m unittest discover -s tests -v
+        shell: python
+        run: |
+          import sys
+          import unittest
+          suite = unittest.defaultTestLoader.discover("tests")
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(0 if result.wasSuccessful() else 1)
       - name: Compile every Python program
-        run: python3 -m compileall -q install.py macbrain scripts tools tests
+        shell: python
+        run: |
+          import compileall
+          ok = True
+          for target in ("install.py", "macbrain", "scripts", "tools", "tests"):
+              ok = compileall.compile_file(target, quiet=1) if target.endswith(".py") else compileall.compile_dir(target, quiet=1) and ok
+          raise SystemExit(0 if ok else 1)
