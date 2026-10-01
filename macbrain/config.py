@@ -12,6 +12,7 @@ DB_PATH = APP_DIR / "macbrain.sqlite3"
 CONFIG_PATH = APP_DIR / "config.json"
 QUARANTINE_DIR = APP_DIR / "quarantine"
 MISSION_ACTIVE_PATH = APP_DIR / "mission.active"
+UNKNOWN_BOOT = "unknown-boot"
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "mission": "speed_up_mac_brain",
@@ -67,7 +68,7 @@ def _boot_id() -> str:
     try:
         return "linux:" + Path("/proc/sys/kernel/random/boot_id").read_text().strip()
     except OSError:
-        return "unknown-boot"
+        return UNKNOWN_BOOT
 
 
 def mission_active() -> bool:
@@ -77,7 +78,9 @@ def mission_active() -> bool:
         data = json.loads(MISSION_ACTIVE_PATH.read_text())
     except (ValueError, OSError):
         return False
-    return data.get("mission") == "speed_up_mac_brain" and data.get("boot_id") == _boot_id()
+    boot = _boot_id()
+    # "unknown-boot" is the same on every boot, so it cannot prove the marker is current.
+    return boot != UNKNOWN_BOOT and data.get("mission") == "speed_up_mac_brain" and data.get("boot_id") == boot
 
 
 def set_mission_active(active: bool, *, user_authorized: bool = False) -> bool:
@@ -89,9 +92,10 @@ def set_mission_active(active: bool, *, user_authorized: bool = False) -> bool:
     """
     ensure_dirs()
     if active:
-        if not user_authorized:
+        boot = _boot_id()
+        if not user_authorized or boot == UNKNOWN_BOOT:
             return False
-        MISSION_ACTIVE_PATH.write_text(json.dumps({"mission": "speed_up_mac_brain", "boot_id": _boot_id()}) + "\n")
+        MISSION_ACTIVE_PATH.write_text(json.dumps({"mission": "speed_up_mac_brain", "boot_id": boot}) + "\n")
         os.chmod(MISSION_ACTIVE_PATH, 0o600)
         return True
     try:
