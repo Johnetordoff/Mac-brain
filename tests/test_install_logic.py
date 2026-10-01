@@ -1,5 +1,7 @@
 import os
+import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import install
@@ -53,9 +55,17 @@ class InstallLogicTests(unittest.TestCase):
         )
         self.assertEqual(result, {"blockers": [], "warnings": []})
 
+    def test_failed_repository_self_test_aborts_before_install(self):
+        fake = SimpleNamespace(returncode=1, stdout="simulated failure\n")
+        with patch("install.subprocess.run", return_value=fake):
+            with self.assertRaises(SystemExit) as ctx:
+                install.run_repo_self_test({"python": sys.executable})
+        self.assertIn("Nothing has been isolated", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 class MissionBootBindingTests(unittest.TestCase):
     def test_mission_marker_is_bound_to_current_boot(self):
