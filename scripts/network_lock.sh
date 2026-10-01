@@ -25,6 +25,9 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ "$(id -u)" -eq 0 ] || { echo "Must run as root." >&2; exit 1; }
+# If the installer is running over SSH and the session hiccups while PF loads, finish
+# (and verify or roll back) anyway instead of dying half-applied with no marker.
+trap '' HUP
 for value in "$SOURCE" "$GATEWAY" "$LOCAL_IP" "$NETMASK"; do
   echo "$value" | /usr/bin/grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || usage
 done
@@ -78,8 +81,10 @@ cat > "$ANCHOR_NEW" <<RULES
 # Speed Up Mac Brain containment anchor. Root-owned; Mac Brain cannot modify it.
 pass quick on lo0 all
 
-# The ONE ordinary remote doorway: controller-initiated IPv4 SSH.
-pass in quick on $IFACE inet proto tcp from $SOURCE to $LOCAL_IP port 22 flags S/SA keep state
+# The ONE ordinary remote doorway: IPv4 SSH from the controller. "flags any" lets PF
+# adopt an SSH session that was already open when containment loaded (e.g. the
+# installer's own session); with S/SA only, that session's packets would be dropped.
+pass in quick on $IFACE inet proto tcp from $SOURCE to $LOCAL_IP port 22 flags any keep state
 
 # No other IP traffic. Established SSH replies are allowed by the state created above.
 block drop quick on $IFACE inet6 all
@@ -167,6 +172,10 @@ cat > "$WATCHDOG" <<WATCH
 #!/bin/bash
 set -u
 SERVICE=$(printf '%q' "$SERVICE")
+# PF and the default route are re-checked every 2 s. The IPv6 service setting is a
+# slower networksetup call and PF already drops inet6, so check it every 30 s to keep
+# this permanent root loop light on the old dual-core CPU.
+TICK=0
 while true; do
   if ! /sbin/pfctl -s info 2>/dev/null | /usr/bin/grep -q 'Status: Enabled' || \
      ! /sbin/pfctl -a macbrain -sr 2>/dev/null | /usr/bin/grep -q 'block drop quick'; then
@@ -174,8 +183,11 @@ while true; do
     /sbin/pfctl -e >/dev/null 2>&1 || true
   fi
   /sbin/route -n get default >/dev/null 2>&1 && /sbin/route -n delete default >/dev/null 2>&1 || true
-  /usr/sbin/networksetup -getinfo "$SERVICE" 2>/dev/null | /usr/bin/grep -q '^IPv6: Off' || \
-    /usr/sbin/networksetup -setv6off "$SERVICE" >/dev/null 2>&1 || true
+  if [ \$((TICK % 15)) -eq 0 ]; then
+    /usr/sbin/networksetup -getinfo "$SERVICE" 2>/dev/null | /usr/bin/grep -q '^IPv6: Off' || \
+      /usr/sbin/networksetup -setv6off "$SERVICE" >/dev/null 2>&1 || true
+  fi
+  TICK=\$((TICK + 1))
   /bin/sleep 2
 done
 WATCH
@@ -199,11 +211,20 @@ PLIST
 /bin/launchctl load "$DAEMON"
 
 # Verify all layers. Any failure triggers rollback through ERR trap.
-/sbin/pfctl -s info 2>/dev/null | /usr/bin/grep -q 'Status: Enabled'
-/sbin/pfctl -a macbrain -sr 2>/dev/null | /usr/bin/grep -q "pass in quick on $IFACE inet proto tcp from $SOURCE"
-/sbin/pfctl -a macbrain -sr 2>/dev/null | /usr/bin/grep -q 'block drop quick.*inet all\|block drop quick.*all'
-! /sbin/route -n get default >/dev/null 2>&1
-/usr/sbin/networksetup -getinfo "$SERVICE" | /usr/bin/grep -q '^IPv6: Off'
+# Capture output first: with pipefail, `cmd | grep -q` can fail spuriously when grep
+# exits early. And never use `! cmd` here: bash's errexit ignores negated commands,
+# so a surviving default route would have passed verification silently.
+PF_INFO=$(/sbin/pfctl -s info 2>/dev/null || true)
+PF_RULES=$(/sbin/pfctl -a macbrain -sr 2>/dev/null || true)
+NET_INFO=$(/usr/sbin/networksetup -getinfo "$SERVICE" 2>/dev/null || true)
+echo "$PF_INFO" | /usr/bin/grep -q 'Status: Enabled'
+echo "$PF_RULES" | /usr/bin/grep -q "pass in quick on $IFACE inet proto tcp from $SOURCE"
+echo "$PF_RULES" | /usr/bin/grep -q 'block drop quick.*inet all\|block drop quick.*all'
+if /sbin/route -n get default >/dev/null 2>&1; then
+  echo "IPv4 default route is still present." >&2
+  false
+fi
+echo "$NET_INFO" | /usr/bin/grep -q '^IPv6: Off'
 
 # Ensure Mac Brain's anchor is placed before the Apple wildcard filter anchor in pf.conf.
 MB_LINE=$(/usr/bin/grep -n '^[[:space:]]*anchor "macbrain"' /etc/pf.conf | /usr/bin/head -1 | /usr/bin/cut -d: -f1)

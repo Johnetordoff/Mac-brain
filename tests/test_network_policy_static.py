@@ -28,6 +28,19 @@ class NetworkPolicyStaticTests(unittest.TestCase):
         self.assertIn('CONTAINMENT_MARKER="$SUPPORT/containment-active"', unlock)
         self.assertIn('"$CONTAINMENT_MARKER"', unlock)
 
+    def test_verification_cannot_be_skipped_by_negation(self):
+        # bash errexit ignores `! cmd`, so a negated check can never trigger rollback.
+        for line in self.text.splitlines():
+            self.assertFalse(line.startswith("! "), line)
+        self.assertIn("IPv4 default route is still present.", self.text)
+
+    def test_existing_controller_ssh_session_survives_arming(self):
+        self.assertIn("port 22 flags any keep state", self.text)
+        self.assertIn("trap '' HUP", self.text)
+
+    def test_watchdog_throttles_slow_networksetup_check(self):
+        self.assertIn("TICK % 15", self.text)
+
 
 if __name__ == "__main__":
     unittest.main()

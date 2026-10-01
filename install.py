@@ -452,9 +452,10 @@ def arm_network_lock(ssh_source: str, interface: str, gateway: str, network_serv
     print(f"Controller allowed to initiate SSH: {ssh_source}")
     print("Mac Brain will block all other new IPv4/IPv6 traffic, remove the IPv4 default route, and disable IPv6 on the active network service when possible.")
     print("SSH reply packets are necessarily outbound packets belonging to the inbound SSH state; Mac Brain will not be allowed to initiate its own network connection.")
-    phrase = input("Type ARM MAC BRAIN to apply containment and start the autonomous mission: ").strip()
+    print("Arming does NOT start the AI. Mac Brain stays OFF until you type START MAC BRAIN.")
+    phrase = input("Type ARM MAC BRAIN to apply network containment: ").strip()
     if phrase != "ARM MAC BRAIN":
-        raise SystemExit("Mac Brain was not armed. Networking remains normal and the autonomous mission did not start.")
+        raise SystemExit("Mac Brain was not armed. Networking remains normal and Mac Brain is OFF.")
     if not all((gateway, network_service, local_ip, netmask)):
         raise SystemExit("Could not identify the active IPv4 network service completely. Refusing takeover because hard no-egress containment cannot be guaranteed.")
     cmd = [
