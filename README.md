@@ -13,7 +13,7 @@ Two hardware assumptions are non-negotiable:
 
 See [PYTHON_POLICY.md](PYTHON_POLICY.md). The short version is:
 
-- Mac Brain executable source is Python.
+- Mac Brain application/control/containment/tool/test source is Python.
 - Required interpreter: **CPython 3.14.x**.
 - Python code uses the **standard library only**. `pyproject.toml` declares `dependencies = []`.
 - Shell scripts and shell wrappers are forbidden.
@@ -22,9 +22,9 @@ See [PYTHON_POLICY.md](PYTHON_POLICY.md). The short version is:
 - Declarative Markdown, JSON, TOML, YAML, plist and XML are allowed as data/configuration.
 - C is allowed only as a Python C-extension for a measured documented bottleneck under `native/`; there is no such extension in this version.
 - Mac Brain-generated executable code is subject to the same rule and is rejected at runtime when it uses a forbidden fenced language.
-- CI runs `tools/repo_policy.py` and rejects tracked source or imports that violate the rule.
+- CI runs `tools/repo_policy.py` and rejects tracked source or imports that violate the rule. CI `run` bodies themselves execute with GitHub Actions' Python shell rather than authored shell commands.
 
-The existing local Qwen model is executed through a pinned native inference executable. That is a pre-existing model runtime, not an alternate language for Mac Brain's application/source logic and not a Python package dependency. Mac Brain must not use that fact as permission to add other native application logic.
+The existing local Qwen model is executed through a pinned native `llama.cpp` executable. That is the one existing third-party native model-runtime boundary; it is **not** being mislabeled as Python or as standard-library code. It is not an allowed pattern for adding application logic or dependencies. If the rule is later tightened to prohibit even the model backend from being non-Python, Qwen must be removed or its inference backend replaced with a compliant Python/C-extension implementation.
 
 ## Bootstrap
 
