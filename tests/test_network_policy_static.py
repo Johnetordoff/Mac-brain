@@ -1,6 +1,10 @@
 import ast
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+
+from scripts import network_lock
 
 
 class NetworkPolicyStaticTests(unittest.TestCase):
@@ -33,9 +37,22 @@ class NetworkPolicyStaticTests(unittest.TestCase):
         self.assertIn("network_watchdog.py", self.lock)
         self.assertIn('"delete", "default"', self.watchdog)
 
-    def test_pf_anchor_precedes_apple_filter_anchor(self):
-        self.assertIn('output.append(\'anchor "macbrain"\')', self.lock)
-        self.assertIn("apple_anchor", self.lock)
+    def test_apple_anchor_recognition_and_ordering_are_unambiguous(self):
+        self.assertTrue(network_lock._is_apple_filter_anchor('anchor "com.apple/*"'))
+        self.assertTrue(network_lock._is_apple_filter_anchor('  anchor "com.apple/*"  '))
+        self.assertFalse(network_lock._is_apple_filter_anchor('anchor "macbrain"'))
+
+        with tempfile.TemporaryDirectory() as td:
+            pf = Path(td) / "pf.conf"
+            out = Path(td) / "pf.new"
+            pf.write_text('set skip on lo0\nanchor "com.apple/*"\npass all\n')
+            with mock.patch.object(network_lock, "PF_CONF", pf), \
+                 mock.patch.object(network_lock, "PF_NEW", out), \
+                 mock.patch.object(network_lock, "root_private"):
+                network_lock.build_pf_config()
+            lines = out.read_text().splitlines()
+        self.assertLess(lines.index('anchor "macbrain"'), lines.index('anchor "com.apple/*"'))
+        self.assertEqual(lines.count('anchor "macbrain"'), 1)
 
     def test_containment_marker_created_and_removed(self):
         self.assertIn('SUPPORT / "containment-active"', self.lock)
