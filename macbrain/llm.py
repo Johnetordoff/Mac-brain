@@ -77,10 +77,9 @@ def _inference_lock():
 
 
 def llama_cli_args(cli: Path, model: Path, prompt: str, *, threads: int, context: int, predict: int, temp: str) -> List[str]:
-    # -no-cnv is required: the pinned llama.cpp build auto-enables interactive
-    # conversation mode whenever the GGUF has a chat template (Qwen does). Without it,
-    # llama-cli re-wraps our ChatML prompt as a system message and then waits for
-    # keyboard input, hanging the console and the background worker.
+    # The pinned pre-refactor llama.cpp build leaves conversation mode OFF unless
+    # -cnv is explicitly requested. Do not enable it: Mac Brain supplies its own
+    # ChatML prompt, and generate() also disconnects stdin from the operator's terminal.
     return [
         str(cli), "-m", str(model),
         "-t", str(threads),
@@ -88,7 +87,6 @@ def llama_cli_args(cli: Path, model: Path, prompt: str, *, threads: int, context
         "-n", str(predict),
         "-ngl", "0",
         "--temp", temp,
-        "-no-cnv",
         "--no-display-prompt",
         "-p", prompt,
     ]
