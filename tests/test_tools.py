@@ -9,6 +9,11 @@ from macbrain import db
 from macbrain.tools import run_tool
 
 
+def canonical(path) -> str:
+    """Compare filesystem identities, not Darwin's /var vs /private/var spellings."""
+    return str(Path(path).resolve())
+
+
 class ToolTests(unittest.TestCase):
     def test_ai_can_propose_but_not_execute_cleanup(self):
         root = Path(tempfile.mkdtemp(prefix="macbrain-candidate-"))
@@ -34,8 +39,7 @@ class ToolTests(unittest.TestCase):
         (child / "blob").write_bytes(b"x" * 4096)
         rows = run_tool("storage_path", {"path": str(root), "limit": 10})
         self.assertTrue(child.exists())
-        self.assertTrue(any(r["path"] == str(child) for r in rows))
-
+        self.assertTrue(any(canonical(r["path"]) == canonical(child) for r in rows))
 
     def test_largest_files_is_read_only_and_bounded(self):
         root = Path(tempfile.mkdtemp(prefix="macbrain-largest-"))
@@ -45,7 +49,7 @@ class ToolTests(unittest.TestCase):
         small.write_bytes(b"x")
         result = run_tool("largest_files", {"path": str(root), "min_mb": 1, "limit": 10, "max_entries": 1000})
         self.assertTrue(big.exists())
-        self.assertEqual(result["files"][0]["path"], str(big))
+        self.assertEqual(canonical(result["files"][0]["path"]), canonical(big))
 
     def test_duplicate_large_files_requires_exact_hash_match(self):
         root = Path(tempfile.mkdtemp(prefix="macbrain-dupes-"))
@@ -59,7 +63,10 @@ class ToolTests(unittest.TestCase):
         result = run_tool("duplicate_large_files", {"path": str(root), "min_mb": 1, "max_entries": 1000, "max_hash_files": 10})
         groups = result["duplicate_groups"]
         self.assertEqual(len(groups), 1)
-        self.assertEqual(set(groups[0]["paths"]), {str(a), str(b)})
+        self.assertEqual(
+            {canonical(p) for p in groups[0]["paths"]},
+            {canonical(a), canonical(b)},
+        )
         self.assertTrue(c.exists())
 
 
