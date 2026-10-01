@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .config import GIT_REPOS_DIR, ensure_dirs
+from .config import GIT_REPOS_DIR
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -32,7 +32,7 @@ def validate_repo_name(name: str) -> str:
 
 def repo_path(name: str) -> Path:
     validate_repo_name(name)
-    ensure_dirs()
+    GIT_REPOS_DIR.mkdir(parents=True, exist_ok=True)
     return GIT_REPOS_DIR / (name + ".git")
 
 
@@ -131,7 +131,7 @@ def repo_summary(name: str) -> Dict[str, object]:
 
 
 def list_repos() -> List[Dict[str, object]]:
-    ensure_dirs()
+    GIT_REPOS_DIR.mkdir(parents=True, exist_ok=True)
     rows: List[Dict[str, object]] = []
     for path in sorted(GIT_REPOS_DIR.glob("*.git")):
         if path.is_dir():
