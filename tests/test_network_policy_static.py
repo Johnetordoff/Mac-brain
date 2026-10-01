@@ -1,45 +1,54 @@
+import ast
 import unittest
 from pathlib import Path
 
 
 class NetworkPolicyStaticTests(unittest.TestCase):
     def setUp(self):
-        self.text = Path("scripts/network_lock.sh").read_text()
+        self.lock = Path("scripts/network_lock.py").read_text()
+        self.unlock = Path("scripts/network_unlock.py").read_text()
+        self.watchdog = Path("scripts/network_watchdog.py").read_text()
+        self.install = Path("install.py").read_text()
+
+    def test_containment_programs_are_python(self):
+        for path in (
+            Path("scripts/network_lock.py"),
+            Path("scripts/network_unlock.py"),
+            Path("scripts/network_watchdog.py"),
+            Path("scripts/uninstall.py"),
+        ):
+            ast.parse(path.read_text(), filename=str(path))
+            self.assertIn("python", path.read_text().splitlines()[0].lower())
+        self.assertEqual(list(Path("scripts").glob("*.sh")), [])
 
     def test_only_exact_controller_source_is_passed_to_ssh_rule(self):
-        self.assertIn('pass in quick on $IFACE inet proto tcp from $SOURCE to $LOCAL_IP port 22', self.text)
-        self.assertNotIn('port 68', self.text)
-        self.assertNotIn('port 67', self.text)
+        self.assertIn("pass in quick on {args.interface} inet proto tcp from {args.source}", self.lock)
+        self.assertIn("port 22 flags any keep state", self.lock)
+        self.assertNotIn("port 68", self.lock)
+        self.assertNotIn("port 67", self.lock)
 
     def test_defense_in_depth_disables_internet_routes(self):
-        self.assertIn('networksetup -setv6off', self.text)
-        self.assertIn('route -n delete default', self.text)
-        self.assertIn('network-watchdog.sh', self.text)
+        self.assertIn('"-setv6off"', self.lock)
+        self.assertIn('"delete", "default"', self.lock)
+        self.assertIn("network_watchdog.py", self.lock)
+        self.assertIn('"delete", "default"', self.watchdog)
 
-    def test_pf_anchor_is_inserted_before_apple_filter_anchor(self):
-        self.assertIn('print "anchor \\"macbrain\\""', self.text)
-        self.assertIn('!inserted && /^[[:space:]]*anchor "com\\.apple\\/\\*"/', self.text)
+    def test_pf_anchor_precedes_apple_filter_anchor(self):
+        self.assertIn('output.append(\'anchor "macbrain"\')', self.lock)
+        self.assertIn("apple_anchor", self.lock)
 
-    def test_containment_marker_created_by_lock_and_removed_by_unlock(self):
-        lock = Path("scripts/network_lock.sh").read_text()
-        unlock = Path("scripts/network_unlock.sh").read_text()
-        self.assertIn('CONTAINMENT_MARKER="$SUPPORT/containment-active"', lock)
-        self.assertIn('echo "armed" > "$CONTAINMENT_MARKER"', lock)
-        self.assertIn('CONTAINMENT_MARKER="$SUPPORT/containment-active"', unlock)
-        self.assertIn('"$CONTAINMENT_MARKER"', unlock)
+    def test_containment_marker_created_and_removed(self):
+        self.assertIn('SUPPORT / "containment-active"', self.lock)
+        self.assertIn('CONTAINMENT_MARKER.write_text("armed', self.lock)
+        self.assertIn('SUPPORT / "containment-active"', self.unlock)
+        self.assertIn("CONTAINMENT_MARKER", self.unlock)
 
-    def test_verification_cannot_be_skipped_by_negation(self):
-        # bash errexit ignores `! cmd`, so a negated check can never trigger rollback.
-        for line in self.text.splitlines():
-            self.assertFalse(line.startswith("! "), line)
-        self.assertIn("IPv4 default route is still present.", self.text)
-
-    def test_existing_controller_ssh_session_survives_arming(self):
-        self.assertIn("port 22 flags any keep state", self.text)
-        self.assertIn("trap '' HUP", self.text)
-
-    def test_watchdog_throttles_slow_networksetup_check(self):
-        self.assertIn("TICK % 15", self.text)
+    def test_installer_never_invokes_a_shell_interpreter(self):
+        self.assertNotIn("/bin/bash", self.install)
+        self.assertNotIn("network_lock.sh", self.install)
+        self.assertNotIn("network_unlock.sh", self.install)
+        self.assertIn("network_lock.py", self.install)
+        self.assertIn("macbrain-wrapper.py", self.install)
 
 
 if __name__ == "__main__":
