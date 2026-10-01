@@ -6,6 +6,8 @@ Anything complicated happens somewhere else. Another computer or AI prepares the
 
 The local Qwen model is **not part of the Git path**. It does not decide what to fetch, merge, retain, compress, clean up, or synchronize.
 
+The operative rule is simple: **Mac Brain stores only data that another machine or a person explicitly hands to it.**
+
 ## Non-negotiable network boundary
 
 After containment:
