@@ -1,3 +1,4 @@
+import os
 import subprocess
 import tempfile
 import unittest
@@ -24,14 +25,33 @@ class GitStoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 gitstore.validate_repo_name(bad)
 
-    def test_create_and_list_bare_repo(self):
+    def test_create_repo_installs_low_cost_storage_guards(self):
         path = gitstore.create_repo("brain-one")
         self.assertTrue((path / "HEAD").exists())
-        rows = gitstore.list_repos()
-        self.assertEqual([row["name"] for row in rows], ["brain-one"])
-        self.assertEqual(rows[0]["commits"], 0)
+        self.assertEqual(gitstore.list_repos(), ["brain-one"])
 
-    def test_import_local_repo(self):
+        def get_config(key):
+            return subprocess.run(
+                ["git", "--git-dir", str(path), "config", "--get", key],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            ).stdout.strip()
+
+        self.assertEqual(get_config("gc.auto"), "0")
+        self.assertEqual(get_config("receive.autogc"), "false")
+        self.assertEqual(get_config("receive.maxInputSize"), str(gitstore.MAX_RECEIVE_BYTES))
+
+        hook = path / "hooks" / "pre-receive"
+        self.assertTrue(hook.exists())
+        self.assertTrue(os.access(str(hook), os.X_OK))
+        text = hook.read_text()
+        self.assertIn("low disk space", text)
+        self.assertIn("MIN_RESERVE_KB=1048576", text)
+
+    def test_push_in_from_local_source_and_explicit_info(self):
+        target = gitstore.create_repo("brain-one")
         source = Path(self.tmp.name) / "source"
         source.mkdir()
         subprocess.run(["git", "init", str(source)], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -45,15 +65,53 @@ class GitStoreTests(unittest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        gitstore.import_local_repo("copy", str(source))
-        info = gitstore.repo_summary("copy")
-        self.assertEqual(info["commits"], 1)
-        self.assertEqual(info["latest"]["subject"], "first")
+        subprocess.run(
+            ["git", "-C", str(source), "push", str(target), "HEAD:refs/heads/main"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        subprocess.run(
+            ["git", "--git-dir", str(target), "symbolic-ref", "HEAD", "refs/heads/main"],
+            check=True,
+        )
 
-    def test_import_rejects_network_sources(self):
-        for source in ("https://example.com/x.git", "git@example.com:x.git"):
-            with self.assertRaises(ValueError):
-                gitstore.import_local_repo("copy", source)
+        info = gitstore.repo_summary("brain-one")
+        self.assertEqual(info["branches"], 1)
+        self.assertEqual(info["latest"]["subject"], "first")
+        self.assertFalse(info["automatic_gc"])
+        self.assertEqual(info["max_receive_bytes"], gitstore.MAX_RECEIVE_BYTES)
+
+    def test_capacity_is_filesystem_level_and_reserves_at_least_one_gib(self):
+        usage = type("Usage", (), {
+            "total": 8 * gitstore._GIB,
+            "used": 6 * gitstore._GIB,
+            "free": 2 * gitstore._GIB,
+        })()
+        with mock.patch.object(gitstore.shutil, "disk_usage", return_value=usage):
+            capacity = gitstore.storage_capacity()
+        self.assertEqual(capacity["reserve"], gitstore.MIN_FREE_RESERVE_BYTES)
+        self.assertTrue(capacity["write_ok"])
+
+    def test_creation_fails_closed_when_storage_reserve_is_reached(self):
+        with mock.patch.object(
+            gitstore,
+            "storage_capacity",
+            return_value={
+                "total": 10,
+                "used": 9,
+                "free": 1,
+                "reserve": 1,
+                "write_ok": False,
+                "max_receive_bytes": gitstore.MAX_RECEIVE_BYTES,
+            },
+        ):
+            with self.assertRaises(RuntimeError):
+                gitstore.create_repo("no-space")
+        self.assertFalse((self.root / "no-space.git").exists())
+
+    def test_git_vault_has_no_network_import_operation(self):
+        self.assertFalse(hasattr(gitstore, "import_local_repo"))
 
 
 if __name__ == "__main__":
