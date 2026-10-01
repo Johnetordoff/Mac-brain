@@ -90,15 +90,12 @@ jobs:
               if p.returncode != 0:
                   raise SystemExit("Built llama-cli does not run on this macOS version.")
           '''
-          new_build = '\n'.join(line[10:] if line.startswith('          ') else line for line in new_build.splitlines())
           text = text[:start] + new_build + text[end:]
 
           old_smoke = '''    # Same argv builder as the runtime so the smoke test exercises the real invocation
               # (including -no-cnv; otherwise llama-cli waits for keyboard input here).'''
-          old_smoke = '\n'.join(line[10:] if line.startswith('          ') else line for line in old_smoke.splitlines())
           new_smoke = '''    # Same argv builder as the runtime so the smoke test exercises the real invocation.
               # stdin is disconnected below so the local model can never wait on keyboard input.'''
-          new_smoke = '\n'.join(line[10:] if line.startswith('          ') else line for line in new_smoke.splitlines())
           if text.count(old_smoke) != 1:
               raise SystemExit('expected smoke-test comment not found exactly once')
           text = text.replace(old_smoke, new_smoke)
