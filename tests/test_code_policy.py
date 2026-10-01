@@ -7,6 +7,9 @@ class CodePolicyTests(unittest.TestCase):
     def test_standard_library_python_is_allowed(self):
         validate_python_source("import json\nfrom pathlib import Path\nprint(json.dumps({'x': str(Path('.'))}))\n")
 
+    def test_project_local_python_import_is_allowed(self):
+        validate_python_source("from scripts import network_lock\n")
+
     def test_third_party_python_import_is_rejected(self):
         with self.assertRaises(ValueError):
             validate_python_source("import requests\n")
