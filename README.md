@@ -6,6 +6,8 @@
 
 Primary target: **13-inch Retina MacBook Pro (mid-2014), Intel, macOS Big Sur 11.7.10, ~6 GB RAM**. The installer still detects the actual machine values instead of assuming the reported specs are exact.
 
+Mac Brain should be treated as **very slow and storage-constrained**. Its local model is not expected to solve complicated coordination, Git, or storage problems. Anything complicated should be prepared elsewhere and handed to Mac Brain as explicit deterministic work.
+
 ## The three-command install
 
 On the old Mac:
@@ -90,6 +92,8 @@ TCP cannot literally be one-way: an inbound SSH connection requires the Mac to t
 
 > **Mac Brain may not initiate an IP connection. The only ordinary remote IP connection allowed is an SSH connection initiated by the one explicitly authorized controller computer, plus the reply packets belonging to that state.**
 
+This applies equally to the Internet and the local network: after containment Mac Brain must not initiate connections to GitHub, another Git server, another brain computer, a LAN share, or any other peer.
+
 Mac Brain uses several layers rather than trusting a prompt instruction:
 
 - the active network service is changed from DHCP to the **same current IPv4 address as a static address**, so post-takeover DHCP traffic is unnecessary;
@@ -152,6 +156,31 @@ Reasons:
 - most of Mac Brain's useful intelligence is deliberately deterministic Python/macOS inspection, so the LLM does not need to carry all of macOS administration knowledge in its weights.
 
 Inference defaults are deliberately modest: 2 CPU threads, 2048-token context, CPU-only. The smaller context is intentional on a ~6 GB machine to leave more RAM headroom for macOS and filesystem work.
+
+The model should be treated as a small local helper, not as a reliable coordinator. It is not used for the Git-vault path described below.
+
+## Passive Git vault
+
+Mac Brain can hold a small selected set of bare Git repositories under `~/.macbrain/git/`, but the feature is deliberately mechanical. See [GIT_APPLIANCE.md](GIT_APPLIANCE.md) for the exact rules.
+
+Important properties:
+
+- no model reasoning in Git operations;
+- no outbound fetch, pull, synchronization, or peer discovery;
+- repositories arrive because the authorized controller pushes them inward;
+- cheap name-only listing by default;
+- automatic Git GC disabled;
+- a protected free-space reserve and bounded receive size because this Mac has little spare storage;
+- no automatic deletion to make room.
+
+Useful commands are:
+
+```bash
+macbrain git capacity
+macbrain git create brain-clone0
+macbrain git list
+macbrain git info brain-clone0
+```
 
 ## Mac Brain is not allowed to guess that “non-system” means “garbage”
 
