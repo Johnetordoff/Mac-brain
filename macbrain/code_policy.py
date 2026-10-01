@@ -15,7 +15,7 @@ BROWSER_DIR_NAMES = {"browser", "web"}
 _BROWSER_JS_SUFFIXES = {".js", ".mjs"}
 
 # Runtime code may import the standard library and this project, nothing else.
-_LOCAL_IMPORT_ROOTS = {"macbrain", "install"}
+_LOCAL_IMPORT_ROOTS = {"macbrain", "install", "scripts", "tools"}
 _STDLIB = frozenset(getattr(sys, "stdlib_module_names", ()))
 
 _FENCE_RE = re.compile(r"```([A-Za-z0-9_+.-]*)\n(.*?)```", re.DOTALL)
@@ -97,6 +97,5 @@ def enforce_response_code_policy(text: str, *, browser_context: bool = False) ->
             continue
         if language in _FORBIDDEN_SHELL_FENCE_LANGS:
             raise ValueError("Mac Brain may not generate shell programs or shell-script code")
-        # Unknown fenced programming languages fail closed.
         raise ValueError(f"Mac Brain may not generate {language or 'unknown'} code")
     return text
