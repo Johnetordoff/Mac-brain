@@ -11,6 +11,7 @@ APP_DIR = Path(os.environ.get("MACBRAIN_HOME", Path.home() / ".macbrain"))
 DB_PATH = APP_DIR / "macbrain.sqlite3"
 CONFIG_PATH = APP_DIR / "config.json"
 QUARANTINE_DIR = APP_DIR / "quarantine"
+GIT_REPOS_DIR = APP_DIR / "git"
 MISSION_ACTIVE_PATH = APP_DIR / "mission.active"
 UNKNOWN_BOOT = "unknown-boot"
 
@@ -27,12 +28,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "model_path": str(APP_DIR / "models" / "qwen2.5-1.5b-instruct-q4_k_m.gguf"),
     "llama_cli": str(APP_DIR / "runtime" / "llama-cli"),
     "quarantine_dir": str(QUARANTINE_DIR),
+    "git_repos_dir": str(GIT_REPOS_DIR),
 }
 
 
 def ensure_dirs() -> None:
     APP_DIR.mkdir(parents=True, exist_ok=True)
     QUARANTINE_DIR.mkdir(parents=True, exist_ok=True)
+    GIT_REPOS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def load_config() -> Dict[str, Any]:
