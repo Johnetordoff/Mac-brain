@@ -64,22 +64,23 @@ def print_proposals() -> None:
 
 def _print_git_repos() -> None:
     from .gitstore import list_repos
-    rows = list_repos()
-    if not rows:
+    names = list_repos()
+    if not names:
         print("No Mac Brain Git repositories yet.")
         print("Create one with: macbrain git create NAME")
         return
-    for row in rows:
-        latest = row.get("latest")
-        suffix = ""
-        if latest:
-            suffix = f"  {str(latest['sha'])[:10]}  {latest['subject']}"
-        print(
-            f"{row['name']:<28} "
-            f"{row['branches']:>3} branch(es)  "
-            f"{row['commits']:>6} commit(s)  "
-            f"{_bytes(int(row['bytes'])):>10}{suffix}"
-        )
+    for name in names:
+        print(name)
+
+
+def _print_git_capacity() -> None:
+    from .gitstore import storage_capacity
+    capacity = storage_capacity()
+    print(f"Disk total: {_bytes(int(capacity['total']))}")
+    print(f"Disk free: {_bytes(int(capacity['free']))}")
+    print(f"Protected free-space reserve: {_bytes(int(capacity['reserve']))}")
+    print(f"Maximum one incoming Git receive: {_bytes(int(capacity['max_receive_bytes']))}")
+    print(f"Accept new Git data: {'yes' if capacity['write_ok'] else 'no'}")
 
 
 def main(argv=None) -> int:
@@ -108,16 +109,17 @@ def main(argv=None) -> int:
     mode.add_argument("--delete", action="store_true")
     a.add_argument("--confirm-delete", action="store_true")
 
-    git_parser = sub.add_parser("git", help="manage canonical LAN-only Git repositories")
+    git_parser = sub.add_parser(
+        "git",
+        help="manage the passive inbound-only Git vault; no model reasoning or outbound sync",
+    )
     git_sub = git_parser.add_subparsers(dest="git_cmd", required=True)
-    git_sub.add_parser("list", help="list repositories stored on Mac Brain")
-    git_create = git_sub.add_parser("create", help="create an empty bare repository")
+    git_sub.add_parser("list", help="cheap name-only listing of stored repositories")
+    git_sub.add_parser("capacity", help="show free-space guard without scanning repositories")
+    git_create = git_sub.add_parser("create", help="create an empty guarded bare repository")
     git_create.add_argument("name")
-    git_info = git_sub.add_parser("info", help="show repository metadata")
+    git_info = git_sub.add_parser("info", help="explicitly inspect one repository")
     git_info.add_argument("name")
-    git_import = git_sub.add_parser("import-local", help="mirror a repository already on this Mac")
-    git_import.add_argument("name")
-    git_import.add_argument("source")
 
     args = parser.parse_args(argv)
     if args.cmd == "status":
@@ -180,19 +182,18 @@ def main(argv=None) -> int:
             return 2
         print("Mac Brain local components are present.")
     elif args.cmd == "git":
-        from .gitstore import create_repo, import_local_repo, repo_summary
+        from .gitstore import create_repo, repo_summary
         try:
             if args.git_cmd == "list":
                 _print_git_repos()
+            elif args.git_cmd == "capacity":
+                _print_git_capacity()
             elif args.git_cmd == "create":
                 path = create_repo(args.name)
-                print(f"Created canonical bare repository: {path}")
+                print(f"Created passive guarded bare repository: {path}")
                 print(f"SSH path from the authorized controller: .macbrain/git/{args.name}.git")
             elif args.git_cmd == "info":
                 print(json.dumps(repo_summary(args.name), indent=2, sort_keys=True))
-            elif args.git_cmd == "import-local":
-                path = import_local_repo(args.name, args.source)
-                print(f"Imported local repository as canonical mirror: {path}")
         except (FileExistsError, FileNotFoundError, RuntimeError, ValueError) as exc:
             print(f"Mac Brain Git: {exc}", file=sys.stderr)
             return 2
