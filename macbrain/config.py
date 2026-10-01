@@ -11,6 +11,8 @@ APP_DIR = Path(os.environ.get("MACBRAIN_HOME", Path.home() / ".macbrain"))
 DB_PATH = APP_DIR / "macbrain.sqlite3"
 CONFIG_PATH = APP_DIR / "config.json"
 QUARANTINE_DIR = APP_DIR / "quarantine"
+# Passive bare repositories received from the authorized controller. This path
+# is local storage only; Mac Brain never fetches or synchronizes it outbound.
 GIT_REPOS_DIR = APP_DIR / "git"
 MISSION_ACTIVE_PATH = APP_DIR / "mission.active"
 UNKNOWN_BOOT = "unknown-boot"
