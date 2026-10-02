@@ -136,6 +136,18 @@ macbrain stop
 
 A reboot also leaves the autonomous worker OFF until `macbrain start` is explicitly authorized again.
 
+## Remote prompts from an authorized controller
+
+The machine-readable remote command is:
+
+```text
+macbrain remote
+```
+
+It reads one JSON request from stdin and writes one JSON response to stdout. In normal use, expose it only through a dedicated restricted SSH key as described in [REMOTE_CONTROL.md](REMOTE_CONTROL.md). The external controller initiates every connection; Mac Brain still initiates none.
+
+Demo mode can answer read-only remote `ask` requests. After containment is armed, remote prompts require the mission to already be ON; remote control cannot start it.
+
 ## Physical network recovery
 
 On the physical Mac, using the same Python 3.14 interpreter that installed Mac Brain:
