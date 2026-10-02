@@ -23,6 +23,7 @@ See [PYTHON_POLICY.md](PYTHON_POLICY.md). The short version is:
 - Required interpreter: **CPython 3.14.x**.
 - Python code uses the **standard library only**. `pyproject.toml` declares `dependencies = []`.
 - Shell scripts and shell wrappers are forbidden.
+- **Node.js and the Node package ecosystem are forbidden:** no `node`, `npm`, `npx`, `yarn`, `pnpm`, or Node-based bridges/tooling.
 - `shell=True` and invoking a shell interpreter from Python are forbidden.
 - Browser JavaScript is allowed only for an explicitly browser-based surface under `browser/` or `web/`.
 - Declarative Markdown, JSON, TOML, YAML, plist and XML are allowed as data/configuration.
