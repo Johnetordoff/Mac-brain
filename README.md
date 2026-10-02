@@ -101,6 +101,8 @@ Mac Brain exposes a small machine-readable control surface through the **existin
 
 The remote surface permits only `ping`, `status`, read-only `proposals`, and `ask`. It cannot arm containment, start/stop the mission, approve cleanup, delete/quarantine data, run a shell, or execute arbitrary commands. Demo mode accepts read-only remote prompts; after containment, prompts are rejected whenever Mac Brain is OFF.
 
+For agent integrations, `controller/macbrain_remote.py` provides a synchronous SSH client and `skills/macbrain-remote/SKILL.md` defines the required request/wait-for-response loop. These are controller-side components; they do not add outbound networking to Mac Brain.
+
 ## Slow-machine operating model
 
 Mac Brain should not try to be clever merely because an LLM is present.
