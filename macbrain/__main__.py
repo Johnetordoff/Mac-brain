@@ -95,6 +95,7 @@ def main(argv=None) -> int:
     sub.add_parser("stop")
     sub.add_parser("prearm-console")
     sub.add_parser("security-audit")
+    sub.add_parser("remote", help="serve one inbound controller JSON request on stdin/stdout")
     first = sub.add_parser("first-mission")
     first.add_argument("--no-llm", action="store_true")
     q = sub.add_parser("ask")
@@ -148,6 +149,9 @@ def main(argv=None) -> int:
     elif args.cmd == "prearm-console":
         from .console import run_prearm_console
         return run_prearm_console()
+    elif args.cmd == "remote":
+        from .remote import run_stdio
+        return run_stdio()
     elif args.cmd == "security-audit":
         from .security import security_baseline
         audit = security_baseline()

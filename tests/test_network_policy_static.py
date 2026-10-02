@@ -60,6 +60,21 @@ class NetworkPolicyStaticTests(unittest.TestCase):
         self.assertIn('SUPPORT / "containment-active"', self.unlock)
         self.assertIn("CONTAINMENT_MARKER", self.unlock)
 
+    def test_remote_control_opens_no_network_client_path(self):
+        remote = Path("macbrain/remote.py").read_text()
+        for forbidden in (
+            "import socket",
+            "from socket",
+            "urllib.request",
+            "http.client",
+            "requests",
+            "websocket",
+            "subprocess",
+            "os.system",
+        ):
+            self.assertNotIn(forbidden, remote)
+        self.assertIn('frozenset({"ping", "status", "ask", "proposals"})', remote)
+
     def test_installer_never_invokes_a_shell_interpreter(self):
         self.assertNotIn("/bin/bash", self.install)
         self.assertNotIn("network_lock.sh", self.install)
