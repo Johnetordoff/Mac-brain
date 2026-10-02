@@ -23,6 +23,7 @@ FORBIDDEN_MANIFEST_NAMES = {
     "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
 }
 SHELL_NAMES = {"sh", "bash", "zsh", "fish", "dash", "ksh", "powershell", "pwsh", "cmd.exe"}
+NODE_PROGRAMS = {"node", "nodejs", "npm", "npx", "yarn", "pnpm"}
 
 
 def _tracked_files() -> list[PurePosixPath]:
@@ -110,6 +111,8 @@ def _check_python(path: PurePosixPath) -> list[str]:
                 program, argv = _subprocess_program(node)
                 if program and program in SHELL_NAMES:
                     errors.append(f"{path}:{node.lineno}: invoking a shell interpreter is forbidden")
+                if program and program in NODE_PROGRAMS:
+                    errors.append(f"{path}:{node.lineno}: invoking Node ecosystem tooling is forbidden")
                 if program and program.startswith("pip"):
                     errors.append(f"{path}:{node.lineno}: installing Python packages is forbidden")
                 if program and program.startswith("python") and "-m" in argv and "pip" in argv:
