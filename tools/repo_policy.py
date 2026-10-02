@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_PYTHON = (3, 14)
 REQUIRED_SPEC = ">=3.14,<3.15"
-LOCAL_IMPORT_ROOTS = {"macbrain", "install", "scripts", "tools"}
+LOCAL_IMPORT_ROOTS = {"macbrain", "install", "scripts", "tools", "controller"}
 STDLIB = frozenset(sys.stdlib_module_names)
 
 DECLARATIVE_OR_DOC_SUFFIXES = {".md", ".toml", ".yaml", ".yml", ".json", ".plist", ".xml"}
