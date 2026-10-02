@@ -33,7 +33,7 @@ class BigSurTlsTests(unittest.TestCase):
         create.assert_called_once_with()
         self.assertEqual(ctx.loaded[0]["cadata"], pem)
         self.assertIn("/usr/bin/security", sh.call_args.args[0])
-        self.assertIn("SystemRootCertificates.keychain", sh.call_args.args[0])
+        self.assertTrue(any(str(arg).endswith("SystemRootCertificates.keychain") for arg in sh.call_args.args[0]))
 
     def test_non_darwin_uses_normal_verified_default_context(self):
         ctx = FakeContext()
