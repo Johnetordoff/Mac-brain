@@ -9,6 +9,12 @@ Two hardware assumptions are non-negotiable:
 1. **Mac Brain is slow.** Its small local model is not a reliable place for complicated programming, coordination, Git logic, or storage strategy. Complicated work should be prepared elsewhere and handed inward as explicit deterministic operations.
 2. **Mac Brain has little storage.** It is not a general archive. Git storage is bounded and fail-closed; large brain histories should be selectively checkpointed elsewhere.
 
+## User-first adaptation
+
+Mac Brain's long-term purpose is broader than machine-health reporting: when the autonomous worker is **ON**, it should make the computer progressively better for the actual user. That means finding recurring performance bottlenecks and their concrete process/file/service causes, learning which parts of the UX the user already likes, avoiding churn in those areas, and making safe reversible user-space improvements where it has authority.
+
+The governing design contract is documented in [USER_FIRST_ADAPTATION.md](USER_FIRST_ADAPTATION.md). Mac Brain is an adaptive layer on top of macOS rather than a replacement for it; host-OS protections, containment, destructive-action approval rules, and other safety boundaries remain authoritative. The same user-first contract is intended to be portable to other operating systems through platform-specific adapters.
+
 ## Python-only engineering rule
 
 See [PYTHON_POLICY.md](PYTHON_POLICY.md). The short version is:
