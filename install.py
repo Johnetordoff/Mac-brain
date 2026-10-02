@@ -10,6 +10,7 @@ import platform
 import py_compile
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -244,10 +245,33 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def download_ssl_context():
+    """Build a verified TLS context, adding macOS system roots when Python cannot see Keychain trust."""
+    context = ssl.create_default_context()
+    if platform.system() != "Darwin":
+        return context
+
+    roots = sh(
+        [
+            "/usr/bin/security", "find-certificate", "-a", "-p",
+            "/System/Library/Keychains/SystemRootCertificates.keychain",
+        ],
+        check=False, capture=True,
+    )
+    pem = roots.stdout or ""
+    if roots.returncode == 0 and "-----BEGIN CERTIFICATE-----" in pem:
+        context.load_verify_locations(cadata=pem)
+        print("HTTPS trust: loaded macOS SystemRootCertificates into Python TLS context.")
+    else:
+        print("WARNING: could not import macOS system root certificates; using Python's default CA store.")
+    return context
+
+
 def download(url: str, dest: Path) -> None:
-    """Standard-library resumable download; no curl or Python package dependency."""
+    """Standard-library resumable HTTPS download with certificate verification."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_suffix(dest.suffix + ".part")
+    context = download_ssl_context()
     for attempt in range(5):
         existing = part.stat().st_size if part.exists() else 0
         headers = {"User-Agent": "MacBrain/0.7"}
@@ -255,7 +279,7 @@ def download(url: str, dest: Path) -> None:
             headers["Range"] = f"bytes={existing}-"
         request = urllib.request.Request(url, headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=30, context=context) as response:
                 status = getattr(response, "status", 200)
                 if existing and status != 206:
                     part.unlink(missing_ok=True)
@@ -517,7 +541,10 @@ def enable_wake_for_network() -> None:
 
 def unload_agent() -> None:
     dest = HOME / "Library" / "LaunchAgents" / "com.macbrain.performancehunter.plist"
-    sh(["/bin/launchctl", "unload", str(dest)], check=False)
+    # Best-effort cleanup. Big Sur's legacy launchctl prints "Unload failed: 5"
+    # when the job is already absent/not loaded; capture it so a non-fatal cleanup
+    # does not look like the installation failure that triggered this finally block.
+    sh(["/bin/launchctl", "unload", str(dest)], check=False, capture=True)
 
 
 def main() -> int:
