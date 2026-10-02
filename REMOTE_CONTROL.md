@@ -90,6 +90,16 @@ specified after the SSH hostname.
 A phone can use the same protocol through an SSH client when it has a permitted network
 route and the dedicated controller credential.
 
+## Synchronous agent/controller client
+
+The repository now includes `controller/macbrain_remote.py` for an authorized external controller and `skills/macbrain-remote/SKILL.md` as the agent interaction contract. The controller opens one SSH session, sends one request, and **waits for Mac Brain's JSON response before returning**. It treats a timeout as unknown completion state instead of blindly retrying.
+
+Example from the authorized controller:
+
+```text
+python3 controller/macbrain_remote.py --host MAC_BRAIN_ADDRESS --user MAC_USER --identity ~/.ssh/macbrain_remote ask "What is making this Mac slow right now?"
+```
+
 ## ChatGPT and other agentic AI
 
 This protocol is the Mac Brain side of the integration boundary. An AI agent can control
