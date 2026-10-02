@@ -34,6 +34,28 @@ The supported series is explicit. When the project deliberately moves to a newer
 
 `pyproject.toml`, runtime checks, and CI must agree on the same Python series.
 
+## No Node ecosystem
+
+This project has a hard **no-Node** rule. Mac Brain must not require, invoke, recommend,
+bootstrap, or generate instructions that depend on Node.js or the Node package ecosystem.
+
+Forbidden tools and runtimes include:
+
+- `node` / Node.js;
+- `npm`;
+- `npx`;
+- `yarn`;
+- `pnpm`;
+- Node-based CLIs, bridges, agents, build systems, package managers, or helper services.
+
+This rule applies even when Node would be a convenient way to obtain an otherwise useful
+third-party tool. Use Python 3.14 standard-library code, supported macOS system tools
+invoked from Python, or a non-Node external controller instead.
+
+Browser JavaScript remains allowed only as browser-delivered source under the existing
+browser/web exception. That exception does **not** authorize Node.js, npm packages, or a
+Node-based build/runtime toolchain.
+
 ## Dependencies
 
 Mac Brain Python code is **standard-library-only**.
