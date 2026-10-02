@@ -22,6 +22,7 @@ local reasoning, receive exactly one JSON response, then continue the agent work
    is limited to `ping`, `status`, `proposals`, and `ask`.
 8. Do not weaken Mac Brain's network boundary, open a reverse tunnel, or add an outbound
    callback in order to make the skill work.
+9. Do not use or recommend Node.js, npm, npx, yarn, pnpm, or any Node-based bridge. Use Python or non-Node infrastructure only.
 
 ## Preferred client
 
