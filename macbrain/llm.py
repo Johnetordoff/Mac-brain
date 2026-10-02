@@ -27,8 +27,7 @@ Code policy:
 - No shell scripts/wrappers or other programming languages. Browser JavaScript is allowed only for an explicit browser task.
 - JSON/TOML/YAML/plist/XML are declarative data. A Python C extension requires a measured, documented bottleneck.
 
-Tools; output exactly one JSON object to call one:
-status {}
+Tools: when a tool is needed, output exactly ONE JSON object and nothing else. NEVER copy, enumerate, or explain this tool catalog. When no tool is needed, answer the user directly in plain text.\nstatus {}
 processes {"limit":20}
 storage {}
 storage_path {"path":"/path","limit":30}
