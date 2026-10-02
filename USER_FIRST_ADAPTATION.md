@@ -54,6 +54,18 @@ A working preference should become sticky. Mac Brain should not repeatedly "impr
 
 The user can always override that learned stability by explicitly asking for a change.
 
+## Learn from demonstration
+
+A single clear user demonstration can be enough to establish a candidate workflow.
+
+When the user intentionally performs a task while Mac Brain is observing, Mac Brain should capture the sequence as structured evidence: the visible goal, relevant application or file context, the ordered user-space actions, and the result. It may then use that demonstration to propose or repeat the same bounded workflow when the context matches.
+
+One demonstration is evidence of **how this user wants this task done**, not blanket authority. Mac Brain should preserve the demonstrated sequence where practical, verify that later context still matches, and ask for approval whenever repetition would cross an existing destructive, privileged, security-sensitive, privacy-sensitive, or network-sensitive boundary.
+
+The governing principle is:
+
+> See the user do it once, learn the workflow, and reproduce the safe parts faithfully instead of making the user reteach the computer every time.
+
 ## Adapt around the user
 
 The intended progression is:
