@@ -93,6 +93,14 @@ Defense in depth:
 
 Arming containment does not automatically start the autonomous worker. A reboot also leaves the worker OFF until the user explicitly starts it.
 
+## Secure inbound remote prompts
+
+See [REMOTE_CONTROL.md](REMOTE_CONTROL.md).
+
+Mac Brain exposes a small machine-readable control surface through the **existing inbound SSH path**. It does not add an HTTP listener, cloud poller, reverse tunnel, or outbound callback. A dedicated OpenSSH key can be restricted with a forced `macbrain remote` command so an external phone/controller/agent bridge can submit JSON prompts without receiving an interactive shell.
+
+The remote surface permits only `ping`, `status`, read-only `proposals`, and `ask`. It cannot arm containment, start/stop the mission, approve cleanup, delete/quarantine data, run a shell, or execute arbitrary commands. Demo mode accepts read-only remote prompts; after containment, prompts are rejected whenever Mac Brain is OFF.
+
 ## Slow-machine operating model
 
 Mac Brain should not try to be clever merely because an LLM is present.
