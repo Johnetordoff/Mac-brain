@@ -109,6 +109,11 @@ def main(argv=None) -> int:
     sub.add_parser("stop")
     sub.add_parser("prearm-console")
     sub.add_parser("security-audit")
+    sub.add_parser("benchmark", help="run and record the repeatable Mac Brain benchmark suite")
+    sub.add_parser("benchmark-history", help="show recent benchmark runs and comparisons")
+    nightly = sub.add_parser("nightly", help="run the full nightly benchmark/diagnostic self-review now")
+    nightly.add_argument("--no-model-review", action="store_true")
+    sub.add_parser("nightly-latest", help="show the latest nightly engineering handoff packet")
     diagnose = sub.add_parser("diagnose", help="identify evidence-backed performance bottlenecks")
     diagnose.add_argument("--deep", action="store_true", help="also attribute offenders to launch items/listeners")
     diagnose.add_argument("--json", action="store_true", help="emit the machine-readable engineering packet")
@@ -211,6 +216,22 @@ def main(argv=None) -> int:
         audit = security_baseline()
         db.add_observation("security_baseline", "manual", audit)
         print(json.dumps(audit, indent=2, sort_keys=True))
+    elif args.cmd == "benchmark":
+        from .benchmarks import run_benchmarks
+        print(json.dumps(run_benchmarks(include_inference=True), indent=2, sort_keys=True))
+    elif args.cmd == "benchmark-history":
+        print(json.dumps(db.recent_benchmark_runs(30), indent=2, sort_keys=True))
+    elif args.cmd == "nightly":
+        from .nightly import run_nightly
+        packet = run_nightly(include_model_review=not args.no_model_review)
+        print(json.dumps(packet, indent=2, sort_keys=True))
+    elif args.cmd == "nightly-latest":
+        from .nightly import latest_nightly
+        packet = latest_nightly()
+        if packet is None:
+            print("No nightly self-review has been recorded yet.", file=sys.stderr)
+            return 2
+        print(json.dumps(packet, indent=2, sort_keys=True))
     elif args.cmd == "diagnose":
         from .diagnostics import build_diagnostic_packet, render_diagnostic_summary
         packet = build_diagnostic_packet(sample_limit=args.samples, deep=args.deep)
