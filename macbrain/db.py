@@ -48,6 +48,27 @@ CREATE TABLE IF NOT EXISTS reports (
     text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_reports_ts ON reports(ts);
+
+CREATE TABLE IF NOT EXISTS filesystem_crawl_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS filesystem_crawl_frontier (
+    path TEXT PRIMARY KEY,
+    depth INTEGER NOT NULL,
+    enqueued_ts REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fs_frontier_depth ON filesystem_crawl_frontier(depth, enqueued_ts);
+
+CREATE TABLE IF NOT EXISTS filesystem_inventory (
+    path TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    mtime REAL NOT NULL DEFAULT 0,
+    seen_ts REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fs_inventory_kind_bytes ON filesystem_inventory(kind, bytes DESC);
 """
 
 
@@ -195,3 +216,120 @@ def prune(sample_days: float = 14, report_days: float = 30) -> None:
     with connection() as conn:
         conn.execute("DELETE FROM samples WHERE ts < ?", (now - sample_days * 86400,))
         conn.execute("DELETE FROM reports WHERE ts < ?", (now - report_days * 86400,))
+
+
+def filesystem_crawl_initialized() -> bool:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT value FROM filesystem_crawl_state WHERE key='initialized'"
+        ).fetchone()
+    return bool(row and row["value"] == "1")
+
+
+def reset_filesystem_crawl(roots: Iterable[str]) -> None:
+    now = time.time()
+    unique = []
+    seen = set()
+    for raw in roots:
+        path = str(raw)
+        if path and path not in seen:
+            seen.add(path)
+            unique.append(path)
+    with connection() as conn:
+        conn.execute("DELETE FROM filesystem_crawl_frontier")
+        conn.execute("DELETE FROM filesystem_inventory")
+        conn.execute("DELETE FROM filesystem_crawl_state")
+        conn.execute(
+            "INSERT INTO filesystem_crawl_state(key,value) VALUES ('initialized','1')"
+        )
+        conn.execute(
+            "INSERT INTO filesystem_crawl_state(key,value) VALUES ('started_ts',?)",
+            (str(now),),
+        )
+        conn.executemany(
+            "INSERT OR IGNORE INTO filesystem_crawl_frontier(path,depth,enqueued_ts) VALUES (?,?,?)",
+            [(path, 0, now) for path in unique],
+        )
+
+
+def enqueue_filesystem_paths(rows: Iterable[tuple[str, int]]) -> int:
+    now = time.time()
+    with connection() as conn:
+        before = conn.total_changes
+        conn.executemany(
+            "INSERT OR IGNORE INTO filesystem_crawl_frontier(path,depth,enqueued_ts) VALUES (?,?,?)",
+            [(str(path), int(depth), now) for path, depth in rows],
+        )
+        return conn.total_changes - before
+
+
+def pop_filesystem_frontier(limit: int) -> List[Dict[str, Any]]:
+    limit = max(1, min(int(limit), 500))
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT path,depth FROM filesystem_crawl_frontier "
+            "ORDER BY depth ASC,enqueued_ts ASC,path ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        if rows:
+            conn.executemany(
+                "DELETE FROM filesystem_crawl_frontier WHERE path=?",
+                [(row["path"],) for row in rows],
+            )
+    return [{"path": row["path"], "depth": int(row["depth"])} for row in rows]
+
+
+def upsert_filesystem_inventory(rows: Iterable[Dict[str, Any]]) -> None:
+    now = time.time()
+    payload = []
+    for row in rows:
+        payload.append((
+            str(row["path"]),
+            str(row["kind"]),
+            int(row.get("bytes", 0) or 0),
+            float(row.get("mtime", 0) or 0),
+            now,
+        ))
+    if not payload:
+        return
+    with connection() as conn:
+        conn.executemany(
+            """
+            INSERT INTO filesystem_inventory(path,kind,bytes,mtime,seen_ts)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(path) DO UPDATE SET
+                kind=excluded.kind,
+                bytes=excluded.bytes,
+                mtime=excluded.mtime,
+                seen_ts=excluded.seen_ts
+            """,
+            payload,
+        )
+
+
+def filesystem_crawl_stats(limit: int = 20) -> Dict[str, Any]:
+    limit = max(1, min(int(limit), 100))
+    with connection() as conn:
+        frontier = conn.execute(
+            "SELECT COUNT(*) AS n FROM filesystem_crawl_frontier"
+        ).fetchone()["n"]
+        inventory = conn.execute(
+            "SELECT COUNT(*) AS n FROM filesystem_inventory"
+        ).fetchone()["n"]
+        directories = conn.execute(
+            "SELECT COUNT(*) AS n FROM filesystem_inventory WHERE kind='directory'"
+        ).fetchone()["n"]
+        large_files = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT path,bytes,mtime,seen_ts FROM filesystem_inventory "
+                "WHERE kind='file' ORDER BY bytes DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        ]
+    return {
+        "frontier_directories": int(frontier),
+        "inventory_items": int(inventory),
+        "directories_seen": int(directories),
+        "largest_files": large_files,
+    }
