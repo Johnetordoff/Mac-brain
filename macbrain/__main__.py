@@ -41,7 +41,20 @@ def print_status() -> None:
     print("Top CPU processes:")
     for p in result["processes"][:8]:
         print(f"  {p['cpu']:6.1f}%  pid {p['pid']:>5}  {p['command']}")
-    print(f"Mission active: {'yes' if mission_active() else 'no'}")
+    from .lifecycle import CONTAINMENT_MARKER, launch_agent_running
+    active = mission_active()
+    contained = CONTAINMENT_MARKER.exists()
+    worker_running = launch_agent_running()
+    if active and contained:
+        mode = "active"
+    elif contained:
+        mode = "armed/off"
+    else:
+        mode = "demo/pre-containment"
+    print(f"Mode: {mode}")
+    print(f"Containment armed: {'yes' if contained else 'no'}")
+    print(f"Background worker running: {'yes' if worker_running else 'no'}")
+    print(f"Mission active: {'yes' if active else 'no'}")
     print(f"Open proposals: {len(db.list_proposals('open'))}")
     print(f"Evidence DB: {DB_PATH}")
 
@@ -161,27 +174,31 @@ def main(argv=None) -> int:
         from pathlib import Path
         from .config import load_config
         cfg = load_config()
-        from .lifecycle import CONTAINMENT_MARKER, LAUNCH_AGENT, launch_agent_running
+        from .lifecycle import LAUNCH_AGENT, launch_agent_running, worker_expected_running
         launch_plist = LAUNCH_AGENT
         launch_running = launch_agent_running()
         recent = db.recent_samples(1)
         fresh_sample = bool(recent and time.time() - float(recent[0].get("ts", 0)) < 300)
         active = mission_active()
-        containment_marker = CONTAINMENT_MARKER
-        # Before containment the installer intentionally starts the worker for a short
-        # proof-of-life check. After containment, OFF means the worker must be unloaded.
-        expect_running = bool(args.expect_running or active or not containment_marker.exists())
+        expect_running = worker_expected_running(
+            mission_is_active=active,
+            explicit_expect_running=args.expect_running,
+        )
         checks = {
             "local_model": Path(str(cfg.get("model_path", ""))).exists(),
             "llama_cli": Path(str(cfg.get("llama_cli", ""))).exists(),
             "evidence_db": DB_PATH.exists(),
-            "fresh_evidence_sample": fresh_sample,
             "launch_agent_plist": launch_plist.exists(),
             "launch_agent_state_expected": (launch_running == expect_running),
             "command_wrapper": Path("/usr/local/bin/macbrain").exists(),
         }
         for name, ok in checks.items():
             print(f"{'OK' if ok else 'FAIL'}  {name}")
+        if expect_running:
+            print(f"{'OK' if fresh_sample else 'FAIL'}  fresh_evidence_sample")
+            checks["fresh_evidence_sample"] = fresh_sample
+        else:
+            print("OK  fresh_evidence_sample (not required while worker is stopped)")
         if not all(checks.values()):
             return 2
         print("Mac Brain local components are present.")
