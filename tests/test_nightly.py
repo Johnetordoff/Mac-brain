@@ -37,12 +37,13 @@ class NightlyTests(unittest.TestCase):
              mock.patch("macbrain.nightly.db.set_runtime_state"), \
              mock.patch("macbrain.nightly.db.add_report"):
             packet = nightly.run_nightly(include_model_review=False)
+            latest = nightly.latest_nightly()
 
         self.assertEqual(packet["benchmark"]["comparison"]["verdict"], "baseline")
         self.assertTrue((root / "latest.json").exists())
         self.assertTrue((root / "latest.txt").exists())
         self.assertIn("BENCHMARKS", (root / "latest.txt").read_text())
-        self.assertIsNotNone(nightly.latest_nightly())
+        self.assertIsNotNone(latest)
 
 
 if __name__ == "__main__":
