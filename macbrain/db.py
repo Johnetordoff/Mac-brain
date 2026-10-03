@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS filesystem_crawl_state (
 CREATE TABLE IF NOT EXISTS filesystem_crawl_frontier (
     path TEXT PRIMARY KEY,
     depth INTEGER NOT NULL,
+    entry_offset INTEGER NOT NULL DEFAULT 0,
     enqueued_ts REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_fs_frontier_depth ON filesystem_crawl_frontier(depth, enqueued_ts);
@@ -247,8 +248,8 @@ def reset_filesystem_crawl(roots: Iterable[str]) -> None:
             (str(now),),
         )
         conn.executemany(
-            "INSERT OR IGNORE INTO filesystem_crawl_frontier(path,depth,enqueued_ts) VALUES (?,?,?)",
-            [(path, 0, now) for path in unique],
+            "INSERT OR IGNORE INTO filesystem_crawl_frontier(path,depth,entry_offset,enqueued_ts) VALUES (?,?,?,?)",
+            [(path, 0, 0, now) for path in unique],
         )
 
 
@@ -257,8 +258,8 @@ def enqueue_filesystem_paths(rows: Iterable[tuple[str, int]]) -> int:
     with connection() as conn:
         before = conn.total_changes
         conn.executemany(
-            "INSERT OR IGNORE INTO filesystem_crawl_frontier(path,depth,enqueued_ts) VALUES (?,?,?)",
-            [(str(path), int(depth), now) for path, depth in rows],
+            "INSERT OR IGNORE INTO filesystem_crawl_frontier(path,depth,entry_offset,enqueued_ts) VALUES (?,?,?,?)",
+            [(str(path), int(depth), 0, now) for path, depth in rows],
         )
         return conn.total_changes - before
 
@@ -267,7 +268,7 @@ def pop_filesystem_frontier(limit: int) -> List[Dict[str, Any]]:
     limit = max(1, min(int(limit), 500))
     with connection() as conn:
         rows = conn.execute(
-            "SELECT path,depth FROM filesystem_crawl_frontier "
+            "SELECT path,depth,entry_offset FROM filesystem_crawl_frontier "
             "ORDER BY depth ASC,enqueued_ts ASC,path ASC LIMIT ?",
             (limit,),
         ).fetchall()
@@ -276,7 +277,14 @@ def pop_filesystem_frontier(limit: int) -> List[Dict[str, Any]]:
                 "DELETE FROM filesystem_crawl_frontier WHERE path=?",
                 [(row["path"],) for row in rows],
             )
-    return [{"path": row["path"], "depth": int(row["depth"])} for row in rows]
+    return [
+        {
+            "path": row["path"],
+            "depth": int(row["depth"]),
+            "entry_offset": int(row["entry_offset"]),
+        }
+        for row in rows
+    ]
 
 
 def upsert_filesystem_inventory(rows: Iterable[Dict[str, Any]]) -> None:
@@ -333,3 +341,18 @@ def filesystem_crawl_stats(limit: int = 20) -> Dict[str, Any]:
         "directories_seen": int(directories),
         "largest_files": large_files,
     }
+
+
+def requeue_filesystem_path(path: str, depth: int, entry_offset: int) -> None:
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO filesystem_crawl_frontier(path,depth,entry_offset,enqueued_ts)
+            VALUES (?,?,?,?)
+            ON CONFLICT(path) DO UPDATE SET
+                depth=excluded.depth,
+                entry_offset=excluded.entry_offset,
+                enqueued_ts=excluded.enqueued_ts
+            """,
+            (str(path), int(depth), int(entry_offset), time.time()),
+        )
