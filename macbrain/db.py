@@ -88,6 +88,19 @@ CREATE TABLE IF NOT EXISTS process_inventory (
 );
 CREATE INDEX IF NOT EXISTS idx_process_inventory_cpu_max ON process_inventory(cpu_max DESC);
 CREATE INDEX IF NOT EXISTS idx_process_inventory_rss_max ON process_inventory(rss_kb_max DESC);
+
+CREATE TABLE IF NOT EXISTS benchmark_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    repo_commit TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_benchmark_runs_ts ON benchmark_runs(ts);
+
+CREATE TABLE IF NOT EXISTS runtime_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -504,3 +517,50 @@ def classify_process(command: str, necessity_state: str, evidence: str) -> None:
         )
         if cur.rowcount == 0:
             raise FileNotFoundError(str(command))
+
+
+def add_benchmark_run(repo_commit: str, payload: Dict[str, Any], ts: Optional[float] = None) -> int:
+    with connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO benchmark_runs(ts,repo_commit,payload) VALUES (?,?,?)",
+            (float(ts or time.time()), str(repo_commit), json.dumps(payload, sort_keys=True)),
+        )
+        return int(cur.lastrowid)
+
+
+def recent_benchmark_runs(limit: int = 30) -> List[Dict[str, Any]]:
+    limit = max(1, min(int(limit), 365))
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT id,ts,repo_commit,payload FROM benchmark_runs ORDER BY ts DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [
+        {
+            "id": int(row["id"]),
+            "ts": float(row["ts"]),
+            "repo_commit": str(row["repo_commit"]),
+            "payload": json.loads(row["payload"]),
+        }
+        for row in rows
+    ]
+
+
+def get_runtime_state(key: str, default: Optional[str] = None) -> Optional[str]:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT value FROM runtime_state WHERE key=?",
+            (str(key),),
+        ).fetchone()
+    return str(row["value"]) if row else default
+
+
+def set_runtime_state(key: str, value: str) -> None:
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO runtime_state(key,value) VALUES (?,?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value
+            """,
+            (str(key), str(value)),
+        )
