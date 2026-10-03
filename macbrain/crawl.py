@@ -75,8 +75,10 @@ def crawl_step(
     """Advance a persistent, bounded read-only filesystem inventory.
 
     The crawl remembers unvisited directories in SQLite. Each call scans only a small
-    batch, records directory metadata plus large files, queues child directories, and
-    returns. This lets the old Mac gradually learn the filesystem without a huge one-shot
+    batch, records directory metadata plus every regular file's byte size, queues child
+    directories, and returns. Necessity classification is stored separately and defaults
+    to unknown so later analysis or a human decision does not get overwritten by rescans.
+    This lets the old Mac gradually learn the filesystem without a huge one-shot
     recursive walk.
     """
     ensure_initialized(roots)
@@ -168,7 +170,7 @@ def crawl_step(
                                 "bytes": 0,
                                 "mtime": float(stat.st_mtime),
                             })
-                        elif entry.is_file(follow_symlinks=False) and stat.st_size >= min_large_bytes:
+                        elif entry.is_file(follow_symlinks=False):
                             inventory.append({
                                 "path": entry.path,
                                 "kind": "file",
@@ -185,6 +187,9 @@ def crawl_step(
     db.upsert_filesystem_inventory(inventory)
     added = db.enqueue_filesystem_paths(queued)
     stats = db.filesystem_crawl_stats()
+    large_files_seen_this_pass = sum(
+        1 for row in inventory if row.get("kind") == "file" and int(row.get("bytes", 0)) >= min_large_bytes
+    )
     result = {
         "complete": stats["frontier_directories"] == 0,
         "directories_scanned": scanned,
@@ -192,6 +197,7 @@ def crawl_step(
         "new_directories_queued": added,
         "permission_errors": permission_errors,
         "truncated_directories": truncated_directories,
+        "large_files_seen_this_pass": large_files_seen_this_pass,
         **stats,
     }
     db.add_observation("filesystem_crawl_step", "local_filesystem", result)
