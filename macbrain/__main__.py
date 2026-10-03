@@ -113,6 +113,21 @@ def main(argv=None) -> int:
     crawl_parser.add_argument("--entries-per-directory", type=int, default=500)
     crawl_parser.add_argument("--min-large-mb", type=int, default=100)
     sub.add_parser("crawl-status", help="show persistent filesystem inventory progress")
+    classify = sub.add_parser("classify-file", help="record a human necessity judgment for an inventoried path")
+    classify.add_argument("path")
+    classify.add_argument(
+        "state",
+        choices=[
+            "unknown",
+            "necessary",
+            "probably_necessary",
+            "rebuildable",
+            "redundant",
+            "probably_unnecessary",
+            "approved_cleanup",
+        ],
+    )
+    classify.add_argument("--evidence", required=True)
     sub.add_parser("remote", help="serve one inbound controller JSON request on stdin/stdout")
     first = sub.add_parser("first-mission")
     first.add_argument("--no-llm", action="store_true")
@@ -185,6 +200,14 @@ def main(argv=None) -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
     elif args.cmd == "crawl-status":
         print(json.dumps(db.filesystem_crawl_stats(), indent=2, sort_keys=True))
+    elif args.cmd == "classify-file":
+        target = str(Path(args.path).expanduser().resolve())
+        try:
+            db.classify_filesystem_path(target, args.state, args.evidence)
+        except FileNotFoundError:
+            print("Path is not in the filesystem inventory yet; crawl it first.", file=sys.stderr)
+            return 2
+        print(f"Recorded {args.state} for {target}. This changes inventory metadata only; no file was modified or deleted.")
     elif args.cmd == "doctor":
         from pathlib import Path
         from .config import load_config
