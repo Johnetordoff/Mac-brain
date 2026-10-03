@@ -13,7 +13,7 @@ PROTOCOL_VERSION = 1
 MAX_REQUEST_CHARS = 16_384
 MAX_PROMPT_CHARS = 8_000
 MAX_REQUEST_ID_CHARS = 128
-_ALLOWED_OPS = frozenset({"ping", "status", "ask", "proposals"})
+_ALLOWED_OPS = frozenset({"ping", "status", "ask", "proposals", "diagnostics"})
 
 
 def _mode() -> str:
@@ -69,7 +69,7 @@ def dispatch_request(request: Any) -> Dict[str, Any]:
         return _error(
             request_id,
             "operation_denied",
-            "allowed operations are ping, status, ask, and proposals",
+            "allowed operations are ping, status, ask, proposals, and diagnostics",
         )
 
     mode = _mode()
@@ -94,6 +94,24 @@ def dispatch_request(request: Any) -> Dict[str, Any]:
 
     if op == "proposals":
         response.update({"ok": True, "result": {"proposals": db.list_proposals("open")}})
+        return response
+
+    if op == "diagnostics":
+        from .diagnostics import build_diagnostic_packet
+        sample_limit = request.get("sample_limit", 60)
+        if not isinstance(sample_limit, int) or isinstance(sample_limit, bool):
+            return _error(request_id, "bad_request", "sample_limit must be an integer")
+        deep = request.get("deep", False)
+        if not isinstance(deep, bool):
+            return _error(request_id, "bad_request", "deep must be boolean")
+        try:
+            packet = build_diagnostic_packet(
+                sample_limit=min(max(sample_limit, 5), 720),
+                deep=deep,
+            )
+        except Exception as exc:
+            return _error(request_id, "diagnostic_error", f"diagnostics failed: {type(exc).__name__}")
+        response.update({"ok": True, "result": {"diagnostics": packet, "mode": mode}})
         return response
 
     # ask is deliberately read-only. Demo mode already allows local read-only reasoning.
