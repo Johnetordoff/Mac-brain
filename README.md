@@ -193,6 +193,7 @@ Manual read-only progress is available even in demo mode:
 ```text
 macbrain crawl
 macbrain crawl-status
+macbrain classify-file /path/to/item probably_unnecessary --evidence "Why you think this can go"
 ```
 
 When the autonomous mission is active, AC-powered, and the machine is idle enough, the
