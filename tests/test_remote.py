@@ -44,6 +44,17 @@ class RemoteControlTests(unittest.TestCase):
         self.assertEqual(result["result"]["diagnostics"], packet)
         diagnose.assert_called_once_with(sample_limit=30, deep=False)
 
+    def test_latest_nightly_report_is_read_only_remote_data(self):
+        packet = {"nightly_version": 1, "date": "2026-10-03"}
+        with patch("macbrain.remote.mission_active", return_value=False), \
+             patch("macbrain.remote.CONTAINMENT_MARKER") as marker, \
+             patch("macbrain.nightly.latest_nightly", return_value=packet):
+            marker.exists.return_value = True
+            result = remote.dispatch_request({"v": 1, "op": "nightly", "request_id": "night-1"})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["result"]["mode"], "armed_off")
+        self.assertEqual(result["result"]["nightly"], packet)
+
     def test_contained_but_off_cannot_be_started_or_prompted_remotely(self):
         with patch("macbrain.remote.mission_active", return_value=False), \
              patch("macbrain.remote.CONTAINMENT_MARKER") as marker, \

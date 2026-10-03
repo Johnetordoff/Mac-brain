@@ -12,7 +12,7 @@ request from standard input and writes one JSON response to standard output.
 
 The remote command is intentionally narrow:
 
-- allowed: `ping`, `status`, `ask`, and read-only `proposals`;
+- allowed: `ping`, `status`, `ask`, read-only `proposals`, `diagnostics`, and latest `nightly` report;
 - not exposed: start, stop, takeover, arm, approve, quarantine, delete, shell, exec, Git
   synchronization, or arbitrary commands;
 - prompt requests are bounded to 8,000 characters;
@@ -143,3 +143,18 @@ This operation remains available while the contained mission is OFF because it d
 start the AI mission or perform cleanup. It may write diagnostic evidence to Mac Brain's
 local SQLite database, but it does not delete files, stop processes, disable services, or
 change networking.
+
+
+## Nightly engineering handoff
+
+After Mac Brain completes a nightly self-review, the authorized controller can retrieve the
+latest stored packet without starting any work on Mac Brain:
+
+```json
+{"v":1,"op":"nightly","request_id":"nightly-1"}
+```
+
+This returns the latest benchmark history comparison, deep diagnostic evidence, filesystem
+crawl progress, engineering requests, and local-model self-review. Retrieval is read-only
+apart from ordinary access logging/state already used by Mac Brain; it does not run a new
+benchmark or change the machine.

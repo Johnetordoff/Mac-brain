@@ -238,6 +238,25 @@ def daemon() -> None:
                 last_battery = now
 
             active = mission_active()
+
+            # Nightly self-review runs once per local calendar date in a four-hour
+            # window beginning at the configured hour. It never activates the mission;
+            # this code is reachable only while the already-authorized worker is active.
+            nightly_hour = int(cfg.get("nightly_hour", 0)) % 24
+            local = time.localtime(now)
+            nightly_window = ((local.tm_hour - nightly_hour) % 24) < 4
+            nightly_date = time.strftime("%Y-%m-%d", local)
+            if (
+                active
+                and ac
+                and nightly_window
+                and db.get_runtime_state("last_nightly_date") != nightly_date
+                and ai_done.is_set()
+            ):
+                from .nightly import run_nightly
+                db.add_report("nightly", f"Starting nightly self-review for {nightly_date}.")
+                run_nightly(include_model_review=True)
+
             if active and (last_report == 0.0 or now - last_report >= report_every):
                 db.add_report("heartbeat", _heartbeat_text(snapshot))
                 last_report = now

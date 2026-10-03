@@ -13,7 +13,7 @@ PROTOCOL_VERSION = 1
 MAX_REQUEST_CHARS = 16_384
 MAX_PROMPT_CHARS = 8_000
 MAX_REQUEST_ID_CHARS = 128
-_ALLOWED_OPS = frozenset({"ping", "status", "ask", "proposals", "diagnostics"})
+_ALLOWED_OPS = frozenset({"ping", "status", "ask", "proposals", "diagnostics", "nightly"})
 
 
 def _mode() -> str:
@@ -69,7 +69,7 @@ def dispatch_request(request: Any) -> Dict[str, Any]:
         return _error(
             request_id,
             "operation_denied",
-            "allowed operations are ping, status, ask, proposals, and diagnostics",
+            "allowed operations are ping, status, ask, proposals, diagnostics, and nightly",
         )
 
     mode = _mode()
@@ -94,6 +94,14 @@ def dispatch_request(request: Any) -> Dict[str, Any]:
 
     if op == "proposals":
         response.update({"ok": True, "result": {"proposals": db.list_proposals("open")}})
+        return response
+
+    if op == "nightly":
+        from .nightly import latest_nightly
+        packet = latest_nightly()
+        if packet is None:
+            return _error(request_id, "no_nightly_report", "no nightly self-review has been recorded yet")
+        response.update({"ok": True, "result": {"nightly": packet, "mode": mode}})
         return response
 
     if op == "diagnostics":
