@@ -112,6 +112,7 @@ def crawl_step(
     for item in batch:
         path = Path(item["path"])
         depth = int(item["depth"])
+        entry_offset = int(item.get("entry_offset", 0))
         if not _allowed(path):
             continue
         scanned += 1
@@ -127,16 +128,20 @@ def crawl_step(
             pass
 
         count = 0
+        processed_this_pass = 0
+        has_more = False
         try:
             with os.scandir(path) as it:
-                for entry in it:
+                for index, entry in enumerate(it):
+                    if index < entry_offset:
+                        continue
+                    if processed_this_pass >= max_entries_per_directory:
+                        has_more = True
+                        truncated_directories += 1
+                        break
+                    processed_this_pass += 1
                     count += 1
                     entries_seen += 1
-                    if count > max_entries_per_directory:
-                        truncated_directories += 1
-                        # Requeue this directory so a future implementation can revisit
-                        # very wide directories deliberately instead of blocking now.
-                        break
                     if entry.name in SKIP_NAMES:
                         continue
                     child = Path(entry.path)
@@ -174,6 +179,8 @@ def crawl_step(
                         permission_errors += 1
         except (OSError, PermissionError, FileNotFoundError):
             permission_errors += 1
+        if has_more:
+            db.requeue_filesystem_path(path, depth, entry_offset + processed_this_pass)
 
     db.upsert_filesystem_inventory(inventory)
     added = db.enqueue_filesystem_paths(queued)
