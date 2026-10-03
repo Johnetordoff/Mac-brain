@@ -177,6 +177,24 @@ Its system prompt explicitly says that generated executable code must be Python 
 
 Mac Brain has no generic shell tool and no generic network tool.
 
+## Progressive filesystem inventory
+
+Mac Brain can gradually map the local filesystem without performing one unbounded recursive
+crawl. The persistent crawler stores its remaining directory frontier in SQLite, advances
+in low-priority bounded batches, records directory metadata and large files, skips device
+files/mounted volumes/transient runtime sockets, and never follows symlinks.
+
+Manual read-only progress is available even in demo mode:
+
+```text
+macbrain crawl
+macbrain crawl-status
+```
+
+When the autonomous mission is active, AC-powered, and the machine is idle enough, the
+background hunter advances the same persistent crawl during its deeper investigation cycle.
+The inventory is evidence only: finding a large file or directory never authorizes deletion.
+
 ## Storage and cleanup safety
 
 Mac Brain distinguishes:
