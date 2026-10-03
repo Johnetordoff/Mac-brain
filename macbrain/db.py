@@ -67,7 +67,9 @@ CREATE TABLE IF NOT EXISTS filesystem_inventory (
     kind TEXT NOT NULL,
     bytes INTEGER NOT NULL DEFAULT 0,
     mtime REAL NOT NULL DEFAULT 0,
-    seen_ts REAL NOT NULL
+    seen_ts REAL NOT NULL,
+    necessity_state TEXT NOT NULL DEFAULT 'unknown',
+    necessity_evidence TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_fs_inventory_kind_bytes ON filesystem_inventory(kind, bytes DESC);
 """
@@ -327,6 +329,16 @@ def filesystem_crawl_stats(limit: int = 20) -> Dict[str, Any]:
         directories = conn.execute(
             "SELECT COUNT(*) AS n FROM filesystem_inventory WHERE kind='directory'"
         ).fetchone()["n"]
+        files = conn.execute(
+            "SELECT COUNT(*) AS n FROM filesystem_inventory WHERE kind='file'"
+        ).fetchone()["n"]
+        file_bytes = conn.execute(
+            "SELECT COALESCE(SUM(bytes),0) AS n FROM filesystem_inventory WHERE kind='file'"
+        ).fetchone()["n"]
+        necessity_rows = conn.execute(
+            "SELECT necessity_state,COUNT(*) AS n FROM filesystem_inventory "
+            "WHERE kind='file' GROUP BY necessity_state"
+        ).fetchall()
         large_files = [
             dict(row)
             for row in conn.execute(
@@ -339,6 +351,9 @@ def filesystem_crawl_stats(limit: int = 20) -> Dict[str, Any]:
         "frontier_directories": int(frontier),
         "inventory_items": int(inventory),
         "directories_seen": int(directories),
+        "files_seen": int(files),
+        "file_bytes_indexed": int(file_bytes),
+        "necessity_counts": {row["necessity_state"]: int(row["n"]) for row in necessity_rows},
         "largest_files": large_files,
     }
 
@@ -356,3 +371,27 @@ def requeue_filesystem_path(path: str, depth: int, entry_offset: int) -> None:
             """,
             (str(path), int(depth), int(entry_offset), time.time()),
         )
+
+
+def get_filesystem_inventory(path: str) -> Optional[Dict[str, Any]]:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT path,kind,bytes,mtime,seen_ts,necessity_state,necessity_evidence "
+            "FROM filesystem_inventory WHERE path=?",
+            (str(path),),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def classify_filesystem_path(path: str, necessity_state: str, evidence: str) -> None:
+    allowed = {"unknown", "necessary", "probably_necessary", "rebuildable", "redundant", "probably_unnecessary", "approved_cleanup"}
+    state = str(necessity_state).strip().lower()
+    if state not in allowed:
+        raise ValueError(f"invalid necessity_state: {necessity_state}")
+    with connection() as conn:
+        cur = conn.execute(
+            "UPDATE filesystem_inventory SET necessity_state=?, necessity_evidence=? WHERE path=?",
+            (state, str(evidence).strip()[:2000], str(path)),
+        )
+        if cur.rowcount == 0:
+            raise FileNotFoundError(str(path))
