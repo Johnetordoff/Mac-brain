@@ -342,8 +342,8 @@ def filesystem_crawl_stats(limit: int = 20) -> Dict[str, Any]:
         large_files = [
             dict(row)
             for row in conn.execute(
-                "SELECT path,bytes,mtime,seen_ts FROM filesystem_inventory "
-                "WHERE kind='file' ORDER BY bytes DESC LIMIT ?",
+                "SELECT path,bytes,mtime,seen_ts,necessity_state,necessity_evidence "
+                "FROM filesystem_inventory WHERE kind='file' ORDER BY bytes DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         ]
