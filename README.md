@@ -177,6 +177,30 @@ Its system prompt explicitly says that generated executable code must be Python 
 
 Mac Brain has no generic shell tool and no generic network tool.
 
+## Nightly benchmark improvement loop
+
+See [NIGHTLY_LOOP.md](NIGHTLY_LOOP.md).
+
+When Mac Brain is already active and on AC power, it performs one nightly self-review in
+the window beginning at midnight by default. It records the repository commit, runs the
+same repeatable CPU/disk/local-inference benchmark suite, compares it with prior runs,
+performs deeper diagnostics/crawling, and writes a durable engineering handoff under
+`~/.macbrain/handoff/`.
+
+The governing rule is **measure before claiming improvement**. Benchmark outcomes may be
+`baseline`, `improved`, `regressed`, `mixed`, or `stable`. Diagnostic/preparatory
+work is allowed even when speed has not improved yet, but it must not be mislabeled as a
+performance win.
+
+Useful commands:
+
+```text
+macbrain benchmark
+macbrain benchmark-history
+macbrain nightly
+macbrain nightly-latest
+```
+
 ## Performance diagnostics and engineering handoff
 
 See [DIAGNOSTICS.md](DIAGNOSTICS.md).
