@@ -55,6 +55,12 @@ class FilesystemCrawlTests(unittest.TestCase):
             max_entries_per_directory=200,
             min_large_mb=1,
         )
+        crawl_step(
+            roots=[self.root],
+            max_directories=100,
+            max_entries_per_directory=200,
+            min_large_mb=1,
+        )
         self.assertEqual(marker.read_text(), "keep")
         item = db.get_filesystem_inventory(str(small))
         self.assertIsNotNone(item)
@@ -64,6 +70,12 @@ class FilesystemCrawlTests(unittest.TestCase):
     def test_classification_survives_normal_recrawl(self):
         target = self.root / "d003" / "candidate.bin"
         target.write_bytes(b"x" * 17)
+        crawl_step(
+            roots=[self.root],
+            max_directories=100,
+            max_entries_per_directory=200,
+            min_large_mb=1,
+        )
         crawl_step(
             roots=[self.root],
             max_directories=100,
