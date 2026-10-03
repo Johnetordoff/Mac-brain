@@ -38,6 +38,16 @@ def _launchctl(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["/bin/launchctl", *args], capture_output=True, text=True, check=False)
 
 
+def worker_expected_running(*, mission_is_active: bool, explicit_expect_running: bool = False) -> bool:
+    """Return whether doctor should require the background worker to be running.
+
+    Demo/pre-containment mode does not imply a continuously running worker. The installer
+    starts it briefly for proof-of-life and then unloads it. Outside that explicit check,
+    only an active mission requires the worker to be running.
+    """
+    return bool(explicit_expect_running or mission_is_active)
+
+
 def launch_worker(wait_seconds: float = 15.0) -> bool:
     """Load the LaunchAgent and explicitly start it; return whether it is running.
 

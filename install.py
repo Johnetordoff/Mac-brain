@@ -576,7 +576,7 @@ def main() -> int:
 
         sh([info["python"], "-m", "macbrain", "first-mission", "--no-llm"], cwd=ROOT)
         proof_of_life()
-        doctor = sh([info["python"], "-m", "macbrain", "doctor"], check=False, capture=True, cwd=ROOT)
+        doctor = sh([info["python"], "-m", "macbrain", "doctor", "--expect-running"], check=False, capture=True, cwd=ROOT)
         print((doctor.stdout or "").strip())
         if doctor.returncode != 0:
             raise SystemExit("Background proof-of-life failed. Containment was NOT applied.")
