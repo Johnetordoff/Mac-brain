@@ -172,7 +172,7 @@ def _run_ai_cycle(done: threading.Event) -> None:
         text = agent_ask(
             "Autonomous SPEED UP MAC BRAIN cycle. Review recent evidence and open proposals. "
             "Investigate the strongest plausible causes of slowness and the most promising reclaimable-storage candidates. "
-            "Use local inspection tools as needed. Try to disprove your own hypotheses. If a filesystem target is genuinely well-supported as reclaimable, create a human-review cleanup proposal with propose_cleanup. "
+            "Use local inspection tools as needed, including the progressive filesystem inventory and process/launch-item evidence. Try to disprove your own hypotheses and connect high-CPU processes to their executable or persistence source when possible. If a filesystem target is genuinely well-supported as reclaimable, create a human-review cleanup proposal with propose_cleanup. "
             "Do not delete, quarantine, kill, disable, uninstall, or change networking. End with a concise progress report for John: what you observed, what you currently suspect, and what you will investigate next."
         )
         db.add_observation("llm_synthesis", "performance_hunter", {"text": text})
@@ -253,6 +253,16 @@ def daemon() -> None:
                         )
                     else:
                         db.add_report("storage", f"Background storage pass inspected {root}; no useful size result was produced. Nothing was changed.")
+
+                from .crawl import crawl_step
+                crawl = crawl_step(max_directories=20, max_entries_per_directory=500, min_large_mb=100)
+                db.add_report(
+                    "filesystem_crawl",
+                    "Progressive filesystem inventory advanced by "
+                    f"{crawl['directories_scanned']} directorie(s) and {crawl['entries_seen']} entries; "
+                    f"{crawl['frontier_directories']} directories remain queued. "
+                    f"Complete: {'yes' if crawl['complete'] else 'no'}. Nothing was changed.",
+                )
                 last_deep = now
 
             if active and ac and idle and ai_done.is_set() and (last_synthesis == 0.0 or now - last_synthesis >= synth_every):

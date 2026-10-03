@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from . import db
+from .crawl import crawl_step
 from .hunter import deep_storage_scan, run_once
 from .metrics import child_directory_sizes, directory_sizes, processes, spotlight_status, time_machine_status
 from .security import security_baseline
@@ -349,6 +350,18 @@ def tool_duplicate_large_files(args: Dict[str, Any]) -> Dict[str, Any]:
     groups.sort(key=lambda x: x["potential_reclaim_bytes"], reverse=True)
     return {"root": str(root), "scanned_entries": scanned, "hashed_files": hashed, "errors": errors, "duplicate_groups": groups}
 
+def tool_filesystem_crawl(args: Dict[str, Any]) -> Dict[str, Any]:
+    return crawl_step(
+        max_directories=min(max(int(args.get("max_directories", 20)), 1), 100),
+        max_entries_per_directory=min(max(int(args.get("max_entries_per_directory", 500)), 50), 2000),
+        min_large_mb=min(max(int(args.get("min_large_mb", 100)), 1), 10240),
+    )
+
+
+def tool_filesystem_inventory(args: Dict[str, Any]) -> Dict[str, Any]:
+    return db.filesystem_crawl_stats(limit=min(max(int(args.get("limit", 20)), 1), 100))
+
+
 def tool_recent_evidence(args: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "samples": db.recent_samples(min(int(args.get("samples", 6)), 15)),
@@ -395,6 +408,8 @@ TOOLS = {
     "cleanup_hints": tool_cleanup_hints,
     "largest_files": tool_largest_files,
     "duplicate_large_files": tool_duplicate_large_files,
+    "filesystem_crawl": tool_filesystem_crawl,
+    "filesystem_inventory": tool_filesystem_inventory,
     "recent_evidence": tool_recent_evidence,
     "propose_cleanup": tool_propose_cleanup,
 }
