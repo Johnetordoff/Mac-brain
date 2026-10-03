@@ -181,8 +181,12 @@ Mac Brain has no generic shell tool and no generic network tool.
 
 Mac Brain can gradually map the local filesystem without performing one unbounded recursive
 crawl. The persistent crawler stores its remaining directory frontier in SQLite, advances
-in low-priority bounded batches, records directory metadata and large files, skips device
-files/mounted volumes/transient runtime sockets, and never follows symlinks.
+in low-priority bounded batches, records directory metadata and the byte size of every
+regular file it encounters, skips device files/mounted volumes/transient runtime sockets,
+and never follows symlinks. Each file also carries a persistent necessity classification,
+initially `unknown`; later analysis or a human decision can mark it necessary, rebuildable,
+redundant, probably unnecessary, or approved for cleanup without losing that judgment on
+the next crawl.
 
 Manual read-only progress is available even in demo mode:
 
