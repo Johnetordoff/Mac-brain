@@ -244,7 +244,7 @@ def daemon() -> None:
 
             if active and (last_diagnostic == 0.0 or now - last_diagnostic >= 10 * 60):
                 from .diagnostics import build_diagnostic_packet
-                packet = build_diagnostic_packet(sample_limit=60, deep=False)
+                packet = build_diagnostic_packet(sample_limit=60, deep=False, collect_current=False)
                 top = packet.get("bottlenecks", [])[:3]
                 if top:
                     summary = "; ".join(
