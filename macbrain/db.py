@@ -72,6 +72,22 @@ CREATE TABLE IF NOT EXISTS filesystem_inventory (
     necessity_evidence TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_fs_inventory_kind_bytes ON filesystem_inventory(kind, bytes DESC);
+
+CREATE TABLE IF NOT EXISTS process_inventory (
+    command TEXT PRIMARY KEY,
+    first_seen_ts REAL NOT NULL,
+    last_seen_ts REAL NOT NULL,
+    samples INTEGER NOT NULL DEFAULT 0,
+    cpu_sum REAL NOT NULL DEFAULT 0,
+    cpu_max REAL NOT NULL DEFAULT 0,
+    rss_kb_sum INTEGER NOT NULL DEFAULT 0,
+    rss_kb_max INTEGER NOT NULL DEFAULT 0,
+    last_pid INTEGER NOT NULL DEFAULT 0,
+    necessity_state TEXT NOT NULL DEFAULT 'unknown',
+    necessity_evidence TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_process_inventory_cpu_max ON process_inventory(cpu_max DESC);
+CREATE INDEX IF NOT EXISTS idx_process_inventory_rss_max ON process_inventory(rss_kb_max DESC);
 """
 
 
@@ -395,3 +411,89 @@ def classify_filesystem_path(path: str, necessity_state: str, evidence: str) -> 
         )
         if cur.rowcount == 0:
             raise FileNotFoundError(str(path))
+
+
+def record_process_snapshot(processes: Iterable[Dict[str, Any]], ts: Optional[float] = None) -> None:
+    now = float(ts or time.time())
+    rows = []
+    for proc in processes:
+        command = str(proc.get("command", "")).strip()
+        if not command:
+            continue
+        rows.append((
+            command,
+            now,
+            now,
+            1,
+            float(proc.get("cpu", 0.0) or 0.0),
+            float(proc.get("cpu", 0.0) or 0.0),
+            int(proc.get("rss_kb", 0) or 0),
+            int(proc.get("rss_kb", 0) or 0),
+            int(proc.get("pid", 0) or 0),
+        ))
+    if not rows:
+        return
+    with connection() as conn:
+        conn.executemany(
+            """
+            INSERT INTO process_inventory(
+                command,first_seen_ts,last_seen_ts,samples,cpu_sum,cpu_max,
+                rss_kb_sum,rss_kb_max,last_pid
+            ) VALUES (?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(command) DO UPDATE SET
+                last_seen_ts=excluded.last_seen_ts,
+                samples=process_inventory.samples + 1,
+                cpu_sum=process_inventory.cpu_sum + excluded.cpu_sum,
+                cpu_max=MAX(process_inventory.cpu_max, excluded.cpu_max),
+                rss_kb_sum=process_inventory.rss_kb_sum + excluded.rss_kb_sum,
+                rss_kb_max=MAX(process_inventory.rss_kb_max, excluded.rss_kb_max),
+                last_pid=excluded.last_pid
+            """,
+            rows,
+        )
+
+
+def process_inventory(limit: int = 40) -> List[Dict[str, Any]]:
+    limit = max(1, min(int(limit), 200))
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                command,first_seen_ts,last_seen_ts,samples,cpu_sum,cpu_max,
+                rss_kb_sum,rss_kb_max,last_pid,necessity_state,necessity_evidence
+            FROM process_inventory
+            ORDER BY cpu_max DESC, rss_kb_max DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        samples = max(int(item["samples"]), 1)
+        item["cpu_avg"] = float(item["cpu_sum"]) / samples
+        item["rss_kb_avg"] = int(item["rss_kb_sum"]) / samples
+        result.append(item)
+    return result
+
+
+def classify_process(command: str, necessity_state: str, evidence: str) -> None:
+    allowed = {
+        "unknown",
+        "necessary",
+        "probably_necessary",
+        "optional",
+        "probably_unnecessary",
+        "approved_stop",
+        "approved_disable",
+    }
+    state = str(necessity_state).strip().lower()
+    if state not in allowed:
+        raise ValueError(f"invalid necessity_state: {necessity_state}")
+    with connection() as conn:
+        cur = conn.execute(
+            "UPDATE process_inventory SET necessity_state=?, necessity_evidence=? WHERE command=?",
+            (state, str(evidence).strip()[:2000], str(command)),
+        )
+        if cur.rowcount == 0:
+            raise FileNotFoundError(str(command))
