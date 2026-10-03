@@ -177,6 +177,31 @@ Its system prompt explicitly says that generated executable code must be Python 
 
 Mac Brain has no generic shell tool and no generic network tool.
 
+## Performance diagnostics and engineering handoff
+
+See [DIAGNOSTICS.md](DIAGNOSTICS.md).
+
+Mac Brain continuously builds evidence about why this Mac is slow: load, swap/memory
+pressure, disk pressure, recurring CPU/RAM-heavy processes, crash-loop signals, and
+filesystem inventory. It keeps a persistent per-command process history so one-time spikes
+do not look the same as recurring bottlenecks.
+
+Useful commands:
+
+```text
+macbrain diagnose
+macbrain diagnose --deep
+macbrain diagnose --json
+macbrain process-inventory
+```
+
+The JSON form is the engineering handoff packet. It contains evidence-backed bottlenecks and
+explicit engineering requests for an external human/agent to turn into code or configuration
+changes. The authorized remote protocol can retrieve the same diagnostics packet directly.
+
+Diagnosis is not authority to act: no process is stopped, service disabled, file deleted, or
+network policy changed by this diagnostic path.
+
 ## Progressive filesystem inventory
 
 Mac Brain can gradually map the local filesystem without performing one unbounded recursive

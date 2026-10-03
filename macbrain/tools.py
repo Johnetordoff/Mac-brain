@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 
 from . import db
 from .crawl import crawl_step
+from .diagnostics import build_diagnostic_packet
 from .hunter import deep_storage_scan, run_once
 from .metrics import child_directory_sizes, directory_sizes, processes, spotlight_status, time_machine_status
 from .security import security_baseline
@@ -362,6 +363,17 @@ def tool_filesystem_inventory(args: Dict[str, Any]) -> Dict[str, Any]:
     return db.filesystem_crawl_stats(limit=min(max(int(args.get("limit", 20)), 1), 100))
 
 
+def tool_diagnostics(args: Dict[str, Any]) -> Dict[str, Any]:
+    return build_diagnostic_packet(
+        sample_limit=min(max(int(args.get("sample_limit", 60)), 5), 720),
+        deep=bool(args.get("deep", False)),
+    )
+
+
+def tool_process_inventory(args: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return db.process_inventory(limit=min(max(int(args.get("limit", 40)), 1), 200))
+
+
 def tool_recent_evidence(args: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "samples": db.recent_samples(min(int(args.get("samples", 6)), 15)),
@@ -410,6 +422,8 @@ TOOLS = {
     "duplicate_large_files": tool_duplicate_large_files,
     "filesystem_crawl": tool_filesystem_crawl,
     "filesystem_inventory": tool_filesystem_inventory,
+    "diagnostics": tool_diagnostics,
+    "process_inventory": tool_process_inventory,
     "recent_evidence": tool_recent_evidence,
     "propose_cleanup": tool_propose_cleanup,
 }

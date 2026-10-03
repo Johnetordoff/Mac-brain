@@ -27,6 +27,23 @@ class RemoteControlTests(unittest.TestCase):
         self.assertEqual(result["result"]["mode"], "demo")
         ask.assert_called_once_with("what is slow?")
 
+    def test_diagnostics_are_available_as_read_only_remote_evidence(self):
+        packet = {"packet_version": 1, "bottlenecks": [], "engineering_requests": []}
+        with patch("macbrain.remote.mission_active", return_value=False), \
+             patch("macbrain.remote.CONTAINMENT_MARKER") as marker, \
+             patch("macbrain.diagnostics.build_diagnostic_packet", return_value=packet) as diagnose:
+            marker.exists.return_value = True
+            result = remote.dispatch_request({
+                "v": 1,
+                "op": "diagnostics",
+                "sample_limit": 30,
+                "deep": False,
+            })
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["result"]["mode"], "armed_off")
+        self.assertEqual(result["result"]["diagnostics"], packet)
+        diagnose.assert_called_once_with(sample_limit=30, deep=False)
+
     def test_contained_but_off_cannot_be_started_or_prompted_remotely(self):
         with patch("macbrain.remote.mission_active", return_value=False), \
              patch("macbrain.remote.CONTAINMENT_MARKER") as marker, \

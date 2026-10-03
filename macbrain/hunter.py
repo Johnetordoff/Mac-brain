@@ -13,6 +13,7 @@ GB = 1024 ** 3
 
 
 def analyze_snapshot(s: Dict[str, Any]) -> List[int]:
+    db.record_process_snapshot(s.get("processes", []))
     proposal_ids: List[int] = []
     disk = s.get("disk", {})
     total = max(int(disk.get("total", 0)), 1)
@@ -204,6 +205,7 @@ def daemon() -> None:
     last_synthesis = 0.0
     last_report = 0.0
     last_battery = 0.0
+    last_diagnostic = 0.0
     home = Path.home()
     rotating_roots = [
         home,
@@ -239,6 +241,20 @@ def daemon() -> None:
             if active and (last_report == 0.0 or now - last_report >= report_every):
                 db.add_report("heartbeat", _heartbeat_text(snapshot))
                 last_report = now
+
+            if active and (last_diagnostic == 0.0 or now - last_diagnostic >= 10 * 60):
+                from .diagnostics import build_diagnostic_packet
+                packet = build_diagnostic_packet(sample_limit=60, deep=False, collect_current=False)
+                top = packet.get("bottlenecks", [])[:3]
+                if top:
+                    summary = "; ".join(
+                        f"{item.get('severity')} {item.get('kind')}: {Path(str(item.get('subject', 'system'))).name or item.get('subject', 'system')}"
+                        for item in top
+                    )
+                else:
+                    summary = "no strong bottleneck has enough evidence yet"
+                db.add_report("diagnostic", f"Performance diagnostic: {summary}.")
+                last_diagnostic = now
 
             if active and ac and idle and now - last_deep >= deep_every and ai_done.is_set():
                 root = rotating_roots[rotating_index % len(rotating_roots)]
