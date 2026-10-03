@@ -73,7 +73,7 @@ class NetworkPolicyStaticTests(unittest.TestCase):
             "os.system",
         ):
             self.assertNotIn(forbidden, remote)
-        self.assertIn('frozenset({"ping", "status", "ask", "proposals", "diagnostics"})', remote)
+        self.assertIn('frozenset({"ping", "status", "ask", "proposals", "diagnostics", "nightly"})', remote)
 
     def test_installer_never_invokes_a_shell_interpreter(self):
         self.assertNotIn("/bin/bash", self.install)
