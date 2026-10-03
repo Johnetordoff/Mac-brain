@@ -415,22 +415,29 @@ def classify_filesystem_path(path: str, necessity_state: str, evidence: str) -> 
 
 def record_process_snapshot(processes: Iterable[Dict[str, Any]], ts: Optional[float] = None) -> None:
     now = float(ts or time.time())
-    rows = []
+    grouped: Dict[str, Dict[str, Any]] = {}
     for proc in processes:
         command = str(proc.get("command", "")).strip()
         if not command:
             continue
-        rows.append((
+        row = grouped.setdefault(command, {"cpu": 0.0, "rss_kb": 0, "pid": 0})
+        row["cpu"] += float(proc.get("cpu", 0.0) or 0.0)
+        row["rss_kb"] += int(proc.get("rss_kb", 0) or 0)
+        row["pid"] = int(proc.get("pid", 0) or row["pid"])
+    rows = [
+        (
             command,
             now,
             now,
             1,
-            float(proc.get("cpu", 0.0) or 0.0),
-            float(proc.get("cpu", 0.0) or 0.0),
-            int(proc.get("rss_kb", 0) or 0),
-            int(proc.get("rss_kb", 0) or 0),
-            int(proc.get("pid", 0) or 0),
-        ))
+            float(values["cpu"]),
+            float(values["cpu"]),
+            int(values["rss_kb"]),
+            int(values["rss_kb"]),
+            int(values["pid"]),
+        )
+        for command, values in grouped.items()
+    ]
     if not rows:
         return
     with connection() as conn:
