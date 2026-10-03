@@ -87,16 +87,25 @@ def _launch_matches(processes: List[Dict[str, Any]]) -> Dict[str, List[Dict[str,
     }
 
 
-def build_diagnostic_packet(*, sample_limit: int = 60, deep: bool = False) -> Dict[str, Any]:
+def build_diagnostic_packet(
+    *,
+    sample_limit: int = 60,
+    deep: bool = False,
+    collect_current: bool = True,
+) -> Dict[str, Any]:
     """Build deterministic performance evidence for a human/external engineer.
 
     This diagnoses and requests investigation. It never kills a process, disables a
     service, removes a file, changes networking, or approves a cleanup.
     """
     sample_limit = max(5, min(int(sample_limit), 720))
-    current = collect_snapshot()
-    db.add_sample(current)
-    db.record_process_snapshot(current.get("processes", []))
+    if collect_current:
+        current = collect_snapshot()
+        db.add_sample(current)
+        db.record_process_snapshot(current.get("processes", []))
+    else:
+        recent_one = db.recent_samples(1)
+        current = recent_one[0] if recent_one else collect_snapshot()
 
     samples = db.recent_samples(sample_limit)
     recent = _recent_summary(samples)
