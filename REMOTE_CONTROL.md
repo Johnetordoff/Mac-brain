@@ -123,3 +123,23 @@ Remote control does not weaken the lifecycle code words:
 
 This preserves the standing rule: outsiders may send explicitly authorized input inward;
 Mac Brain itself cannot go outward looking for work, services, updates, or controllers.
+
+
+## Performance diagnostic handoff
+
+The controller can request deterministic performance evidence without asking the local model
+to interpret it:
+
+```json
+{"v":1,"op":"diagnostics","request_id":"diag-1","sample_limit":60,"deep":false}
+```
+
+The response contains recent load/swap/disk evidence, persistent process CPU/RAM history,
+filesystem-inventory progress, evidence-backed bottlenecks, and compact engineering requests
+that an external engineer/agent can use to prepare a code change. `deep:true` additionally
+attempts to correlate recurring offenders with launch items and listeners.
+
+This operation remains available while the contained mission is OFF because it does not
+start the AI mission or perform cleanup. It may write diagnostic evidence to Mac Brain's
+local SQLite database, but it does not delete files, stop processes, disable services, or
+change networking.
