@@ -42,6 +42,8 @@ security_audit {}
 cleanup_hints {"limit":40,"download_files":25}
 largest_files {"path":"~/","limit":30,"min_mb":100,"max_entries":30000}
 duplicate_large_files {"path":"~/","min_mb":100,"max_entries":30000,"max_hash_files":40}
+filesystem_crawl {"max_directories":20,"max_entries_per_directory":500,"min_large_mb":100}
+filesystem_inventory {"limit":20}
 recent_evidence {"samples":6,"observations":15}
 propose_cleanup {"target":"/path","title":"...","evidence":"...","expected_benefit":"...","risk":"..."}
 
